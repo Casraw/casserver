@@ -1,6 +1,6 @@
 import json
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 from backend.config import settings
 import logging
 import os
@@ -38,7 +38,7 @@ class PolygonService:
         self.web3 = Web3(Web3.HTTPProvider(settings.POLYGON_RPC_URL, request_kwargs={'timeout': 60}))
 
         if "mumbai" in settings.POLYGON_RPC_URL.lower() or "matic" in settings.POLYGON_RPC_URL.lower() or "polygon" in settings.POLYGON_RPC_URL.lower():
-             self.web3.middleware_onion.inject(geth_poa_middleware, layer=0)
+             self.web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
              logger.info("Injected PoA middleware for Polygon.")
 
         if not self.web3.is_connected(): # Removed show_traceback

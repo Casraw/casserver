@@ -250,14 +250,14 @@ class TestCascoinService(unittest.TestCase):
         mock_settings.CASCOIN_RPC_USER = "user"
         mock_settings.CASCOIN_RPC_PASSWORD = "password"
 
-        expected_txid = "a1b2c3d4e5f6" * 10 + "a1b2" # 64 char hex string
+        expected_txid = ("0123456789abcdef" * 4) # 64 char hex string
         mock_rpc_call.return_value = expected_txid
 
         service = CascoinService()
-        txid = service.send_cas(to_address="validcasaddress", amount=10.5)
+        txid = service.send_cas(to_address="validcasaddress_longenough", amount=10.5)
 
         self.assertEqual(txid, expected_txid)
-        mock_rpc_call.assert_called_once_with("sendtoaddress", ["validcasaddress", 10.5])
+        mock_rpc_call.assert_called_once_with("sendtoaddress", ["validcasaddress_longenough", 10.5])
 
     @patch.object(CascoinService, '_rpc_call')
     @patch('backend.services.cascoin_service.settings')
@@ -270,10 +270,10 @@ class TestCascoinService(unittest.TestCase):
 
         service = CascoinService()
         with self.assertLogs('backend.services.cascoin_service', level='ERROR') as cm:
-            txid = service.send_cas(to_address="validcasaddress", amount=5.0)
+            txid = service.send_cas(to_address="validcasaddress_longenough", amount=5.0)
 
         self.assertIsNone(txid)
-        self.assertIn("Failed to send CAS to validcasaddress. Received from RPC call: None", cm.output[0])
+        self.assertIn("Failed to send CAS to validcasaddress_longenough. Received from RPC call: None", cm.output[0])
         self.assertIn("This could be due to RPC errors", cm.output[1])
 
 
@@ -349,10 +349,10 @@ class TestCascoinService(unittest.TestCase):
 
         service = CascoinService()
         with self.assertLogs('backend.services.cascoin_service', level='ERROR') as cm:
-            txid = service.send_cas(to_address="validcasaddress", amount=5.0)
+            txid = service.send_cas(to_address="validcasaddress_longenough", amount=5.0)
 
         self.assertIsNone(txid)
-        self.assertIn("Failed to send CAS to validcasaddress. Received from RPC call: 12345", cm.output[0])
+        self.assertIn("Failed to send CAS to validcasaddress_longenough. Received from RPC call: 12345", cm.output[0])
         self.assertIn("Expected a string transaction ID, but got type <class 'int'>.", cm.output[1])
 
     @patch.object(CascoinService, '_rpc_call')
@@ -366,10 +366,10 @@ class TestCascoinService(unittest.TestCase):
 
         service = CascoinService()
         with self.assertLogs('backend.services.cascoin_service', level='ERROR') as cm:
-            txid = service.send_cas(to_address="validcasaddress", amount=5.0)
+            txid = service.send_cas(to_address="validcasaddress_longenough", amount=5.0)
 
         self.assertIsNone(txid)
-        self.assertIn("Failed to send CAS to validcasaddress. Received from RPC call: short_txid", cm.output[0])
+        self.assertIn("Failed to send CAS to validcasaddress_longenough. Received from RPC call: short_txid", cm.output[0])
         self.assertIn("Expected 64-character hex transaction ID, but got length 10.", cm.output[1])
 
 if __name__ == '__main__':

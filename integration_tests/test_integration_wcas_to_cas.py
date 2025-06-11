@@ -18,7 +18,7 @@ class TestWCasToCasIntegration(unittest.TestCase):
         # Reset mock services state before each test
         try:
             requests.post(f"{MOCK_POLYGON_NODE_URL}/test/reset")
-            requests.post(f"{MOCK_CASCOIN_NODE_URL}/test/reset_cas_hot_wallet", json={"initial_balance": "10000.0"})
+            requests.post(f"{MOCK_CASCOIN_NODE_URL}/test/reset_state", json={"initial_balance": "10000.0"}) # Corrected endpoint
         except requests.exceptions.ConnectionError as e:
             print(f"Warning: Could not connect to mock services during setUp: {e}")
             print("Please ensure mock_cascoin_node.py and mock_polygon_node.py are running.")
@@ -58,6 +58,7 @@ class TestWCasToCasIntegration(unittest.TestCase):
             "amount": str(amount_wcas)
         }
         response = requests.post(f"{MOCK_POLYGON_NODE_URL}/wcas/transfer_to_bridge", json=transfer_payload)
+        # IMPORTANT: Raise for status to catch errors like insufficient balance from the mock node
         response.raise_for_status()
         tx_details = response.json()
         print(f"Simulated wCAS transfer from {user_polygon_address} to bridge: {tx_details}")
@@ -186,13 +187,19 @@ class TestWCasToCasIntegration(unittest.TestCase):
         print(f"User {user_polygon_address} has 10 wCAS, attempting to send {wcas_attempt_amount} to bridge.")
 
         with self.assertRaises(requests.exceptions.HTTPError) as context:
-            self._simulate_user_wcas_deposit_to_bridge(user_polygon_address, wcas_attempt_amount)
+            # Directly call the transfer endpoint without the helper's auto-mint logic
+            transfer_payload = {
+                "from_address": user_polygon_address,
+                "amount": str(wcas_attempt_amount)
+            }
+            response = requests.post(f"{MOCK_POLYGON_NODE_URL}/wcas/transfer_to_bridge", json=transfer_payload)
+            response.raise_for_status() # This should raise HTTPError due to insufficient balance
 
         self.assertGreaterEqual(context.exception.response.status_code, 400)
         self.assertLess(context.exception.response.status_code, 500)
         # Check error message from mock_polygon_node if specific enough
         error_json = context.exception.response.json()
-        self.assertIn("Insufficient balance for transfer", error_json.get('error', '').lower())
+        self.assertIn("insufficient balance for transfer", error_json.get('error', '').lower())
         print(f"Verified: Attempt to transfer wCAS with insufficient balance failed as expected (status: {context.exception.response.status_code}).")
 
 

@@ -17,7 +17,7 @@ class TestCasToWCasIntegration(unittest.TestCase):
     def setUp(self):
         # Reset mock services state before each test
         try:
-            requests.post(f"{MOCK_CASCOIN_NODE_URL}/test/set_transaction", json={
+            requests.post(f"{MOCK_CASCOIN_NODE_URL}/test/set_cas_deposit_transaction", json={
                 "txid": "dummy_reset_tx", "confirmations": 0, "amount": "0", "cas_recipient_address": "dummy_addr"
             }) # Clear any old tx
             requests.post(f"{MOCK_POLYGON_NODE_URL}/test/reset")
@@ -34,7 +34,7 @@ class TestCasToWCasIntegration(unittest.TestCase):
             "confirmations": confirmations,
             "cas_recipient_address": cas_bridge_deposit_address
         }
-        response = requests.post(f"{MOCK_CASCOIN_NODE_URL}/test/set_transaction", json=payload)
+        response = requests.post(f"{MOCK_CASCOIN_NODE_URL}/test/set_cas_deposit_transaction", json=payload)
         response.raise_for_status()
         print(f"Simulated CAS deposit: {txid}, amount: {amount}, confirmations: {confirmations}")
 
