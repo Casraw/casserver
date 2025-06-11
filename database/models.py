@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func # For default timestamp
 
@@ -29,6 +29,21 @@ class CasDeposit(Base):
     mint_tx_hash = Column(String, nullable=True)
 
     user = relationship("User", back_populates="deposits")
+    processed_cascoin_txs = relationship("ProcessedCascoinTxs", back_populates="cas_deposit")
+
+class ProcessedCascoinTxs(Base):
+    __tablename__ = "processed_cascoin_txs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cascoin_txid = Column(String, index=True, nullable=False)
+    cascoin_vout_index = Column(Integer, nullable=False)
+    cas_deposit_id = Column(Integer, ForeignKey("cas_deposits.id"), nullable=False)
+    amount_received = Column(Float, nullable=False)
+    processed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    cas_deposit = relationship("CasDeposit", back_populates="processed_cascoin_txs")
+
+    __table_args__ = (UniqueConstraint('cascoin_txid', 'cascoin_vout_index', name='_cascoin_txid_vout_uc'),)
 
 class PolygonTransaction(Base):
     __tablename__ = "polygon_transactions"
@@ -44,6 +59,15 @@ class PolygonTransaction(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     cas_release_tx_hash = Column(String, nullable=True)
+
+class WcasToCasReturnIntention(Base):
+    __tablename__ = "wcas_to_cas_return_intentions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_polygon_address = Column(String, index=True, nullable=False) # Address sending wCAS
+    target_cascoin_address = Column(String, nullable=False)    # Cascoin address to receive CAS
+    status = Column(String, default="pending_deposit", index=True) # e.g., pending_deposit, deposit_detected, processed, expired
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 # Function to create tables
 def create_db_tables():

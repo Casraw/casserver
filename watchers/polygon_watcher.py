@@ -15,19 +15,27 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
+# IMPORTANT: Review and set these via environment variables for production.
 # These should ideally be consistent with backend.config.settings or loaded from a shared config/env
 POLYGON_RPC_URL = os.getenv("POLYGON_RPC_URL", "https_rpc_mumbai_maticvigil_com") # From backend config
-WCAS_CONTRACT_ADDRESS = os.getenv("WCAS_CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000") # From backend config
+WCAS_CONTRACT_ADDRESS = os.getenv("WCAS_CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000") # From backend config, placeholder
 WCAS_CONTRACT_ABI_JSON_PATH = os.getenv("WCAS_CONTRACT_ABI_JSON_PATH", "smart_contracts/wCAS_ABI.json") # From backend config
-BRIDGE_WCAS_COLLECTION_ADDRESS = os.getenv("BRIDGE_WCAS_DEPOSIT_ADDRESS", "0xYourBridgeWCASDepositAddressHereChangeMe") # This is where users send wCAS
+# Address on Polygon where users send their wCAS to be bridged back to Cascoin. This is monitored by the watcher.
+BRIDGE_WCAS_COLLECTION_ADDRESS = os.getenv("BRIDGE_WCAS_DEPOSIT_ADDRESS", "0xYourBridgeWCASDepositAddressHereChangeMe") # From backend config
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bridge.db") # Must match backend's DB
-POLL_INTERVAL_SECONDS = 15 # How often to check for new events/blocks on Polygon
-POLYGON_CONFIRMATIONS_REQUIRED = 12 # Number of block confirmations on Polygon
+# Database URL - should match the backend's configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bridge.db")
 
-BRIDGE_API_URL = "http://localhost:8000/api" # For triggering CAS release
+# How often to check for new events/blocks on Polygon (in seconds)
+POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "15"))
 
-# Post-process RPC URL
+# Number of block confirmations on Polygon before a wCAS deposit is considered final
+POLYGON_CONFIRMATIONS_REQUIRED = int(os.getenv("POLYGON_CONFIRMATIONS_REQUIRED", "12"))
+
+# URL for the backend's internal API endpoints (for triggering CAS release)
+BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://localhost:8000/internal")
+
+# Post-process RPC URL (e.g. Infura often provides https_rpc... format)
 if POLYGON_RPC_URL.startswith("https_"):
     POLYGON_RPC_URL = POLYGON_RPC_URL.replace("https_", "https://", 1)
 
@@ -53,6 +61,19 @@ class PolygonTransaction(Base):
 
     def __repr__(self):
         return f"<PolygonTransaction(id={self.id}, poly_tx='{self.polygon_tx_hash}', status='{self.status}')>"
+
+# Mirrored WcasToCasReturnIntention model from database.models
+class WcasToCasReturnIntention(Base):
+    __tablename__ = "wcas_to_cas_return_intentions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_polygon_address = Column(String, index=True, nullable=False)
+    target_cascoin_address = Column(String, nullable=False)
+    status = Column(String, default="pending_deposit", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<WcasToCasReturnIntention(id={self.id}, poly_addr='{self.user_polygon_address}', cas_addr='{self.target_cascoin_address}', status='{self.status}')>"
 
 # --- Web3 Setup ---
 w3 = None
@@ -223,29 +244,52 @@ def check_polygon_events():
                 # Or, the user's Polygon address (event.args['from']) is linked to their Cascoin address in our DB.
 
                 # For this watcher, let's assume the backend has a way to map event.args['from'] (user's Polygon addr)
-                # to their requested Cascoin address. If not, this tx cannot be processed further.
-                # We will simulate that this mapping is done via an API call or DB lookup.
-                # Placeholder:
-                user_cas_address_placeholder = f"cas_addr_for_{event.args['from'][-6:]}"
-                logger.warning(f"Using placeholder Cascoin address: {user_cas_address_placeholder}. Real mapping needed!")
+                # Checksum the address from the event for consistent DB lookups
+                user_polygon_address_checksum = Web3.to_checksum_address(event.args['from'])
+                amount_float = float(event.args['value']) / (10**wcas_decimals)
+
+                target_cas_address = "UNKNOWN_NO_INTENTION" # Default if no intention found
+                poly_tx_status = "on_hold_no_intention"     # Default status
+
+                # Fetch the user's intention from the database
+                intention = db.query(WcasToCasReturnIntention)\
+                    .filter(WcasToCasReturnIntention.user_polygon_address == user_polygon_address_checksum)\
+                    .filter(WcasToCasReturnIntention.status == "pending_deposit")\
+                    .order_by(WcasToCasReturnIntention.created_at.desc())\
+                    .first()
+
+                if intention:
+                    logger.info(f"Found pending intention for {user_polygon_address_checksum}: ID {intention.id}, Target CAS: {intention.target_cascoin_address}")
+                    target_cas_address = intention.target_cascoin_address
+                    poly_tx_status = "pending_polygon_confirmation" # Ready for confirmation
+
+                    # Update intention status to 'deposit_detected'
+                    intention.status = "deposit_detected"
+                    intention.updated_at = func.now()
+                    # The commit for this will happen with the PolygonTransaction record
+                else:
+                    logger.warning(f"No 'pending_deposit' intention found for wCAS sender: {user_polygon_address_checksum}. Holding transaction.")
 
                 new_poly_tx = PolygonTransaction(
-                    user_cascoin_address_request=user_cas_address_placeholder, # CRITICAL PLACEHOLDER
-                    from_address=event.args['from'],
-                    to_address=event.args['to'], # This will be the bridge's collection address
+                    user_cascoin_address_request=target_cas_address,
+                    from_address=user_polygon_address_checksum, # Use checksummed address
+                    to_address=Web3.to_checksum_address(event.args['to']), # Also checksum bridge address
                     amount=amount_float,
                     polygon_tx_hash=tx_hash,
-                    status="pending_polygon_confirmation"
+                    status=poly_tx_status
                 )
                 db.add(new_poly_tx)
-                db.commit()
+                db.commit() # Commit both new_poly_tx and updated intention (if any)
                 db.refresh(new_poly_tx)
-                logger.info(f"Stored new PolygonTransaction ID {new_poly_tx.id} for tx {tx_hash} with status 'pending_polygon_confirmation'.")
-
+                if intention: # Refresh intention if it was updated
+                    db.refresh(intention)
+                logger.info(f"Stored new PolygonTransaction ID {new_poly_tx.id} for tx {tx_hash} with status '{poly_tx_status}'. Target CAS Address: {target_cas_address}")
         else:
             logger.info("No new relevant wCAS Transfer events found.")
 
         # Check confirmations for transactions in 'pending_polygon_confirmation'
+        # This part of the logic remains largely the same but will only effectively proceed for transactions
+        # that were created with status 'pending_polygon_confirmation' (i.e., an intention was found).
         pending_confirmation_txs = db.query(PolygonTransaction).filter(PolygonTransaction.status == "pending_polygon_confirmation").all()
         if pending_confirmation_txs:
             logger.info(f"Checking confirmations for {len(pending_confirmation_txs)} Polygon transactions...")
@@ -257,30 +301,32 @@ def check_polygon_events():
                         tx_block_number = tx_receipt.blockNumber
                         confirmations = current_polygon_block - tx_block_number
                         logger.info(f"Tx {tx_record.polygon_tx_hash}: Block {tx_block_number}, Current Block {current_polygon_block}, Confirmations: {confirmations}")
+
                         if confirmations >= POLYGON_CONFIRMATIONS_REQUIRED:
-                            logger.info(f"Tx {tx_record.polygon_tx_hash} has {confirmations} confirmations. Sufficiently confirmed.")
+                            logger.info(f"Tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}) has {confirmations} confirmations. Sufficiently confirmed.")
                             tx_record.status = "wcas_confirmed"
                             tx_record.updated_at = func.now()
-                            db.commit()
-                            logger.info(f"PolygonTransaction ID {tx_record.id} status updated to 'wcas_confirmed'.")
+                            # db.commit() # Commit will be done after triggering release attempt
 
-                            # Trigger CAS release
-                            if trigger_cas_release(tx_record.id, tx_record.amount, tx_record.user_cascoin_address_request):
+                            if tx_record.user_cascoin_address_request == "UNKNOWN_NO_INTENTION":
+                                logger.error(f"Tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}) confirmed but has no target Cascoin address. Status remains 'wcas_confirmed', requires manual intervention.")
+                                # No CAS release trigger if address is unknown
+                            elif trigger_cas_release(tx_record.id, tx_record.amount, tx_record.user_cascoin_address_request):
                                 tx_record.status = "cas_release_triggered"
-                                db.commit()
                                 logger.info(f"PolygonTransaction ID {tx_record.id} status updated to 'cas_release_triggered'.")
                             else:
                                 tx_record.status = "cas_release_trigger_failed"
-                                db.commit()
                                 logger.error(f"Failed to trigger CAS release for PolygonTransaction ID {tx_record.id}.")
+                            db.commit() # Commit status changes for tx_record
                         else:
-                            logger.info(f"Tx {tx_record.polygon_tx_hash} has {confirmations}/{POLYGON_CONFIRMATIONS_REQUIRED} confirmations. Waiting.")
+                            logger.info(f"Tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}) has {confirmations}/{POLYGON_CONFIRMATIONS_REQUIRED} confirmations. Waiting.")
                     else:
-                        logger.warning(f"Could not get receipt for tx {tx_record.polygon_tx_hash}. It might not be mined yet or is invalid.")
-                except Exception as e: # Catch specific web3 exceptions if possible
-                    logger.error(f"Error checking confirmations for tx {tx_record.polygon_tx_hash}: {e}", exc_info=True)
+                        logger.warning(f"Could not get receipt for tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}). It might not be mined yet or is invalid.")
+                except Exception as e:
+                    logger.error(f"Error checking confirmations for tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}): {e}", exc_info=True)
+                    db.rollback() # Rollback any single tx confirmation error
 
-        save_last_processed_block(db, to_block) # Save the latest block number we've processed up to
+        save_last_processed_block(db, to_block)
 
     except Exception as e:
         logger.error(f"Error during Polygon event checking cycle: {e}", exc_info=True)

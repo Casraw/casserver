@@ -17,6 +17,50 @@ class User(UserBase):
     class Config:
         from_attributes = True
 
+# --- Schemas for wCAS to CAS Return Intention (Polygon -> Cascoin) ---
+
+class WCASReturnIntentionRequest(BaseModel):
+    user_polygon_address: str = Field(..., description="The Polygon address the user will send wCAS from.")
+    target_cascoin_address: str = Field(..., description="The Cascoin address to receive CAS.")
+
+class WCASReturnIntentionResponse(BaseModel):
+    id: int
+    user_polygon_address: str
+    target_cascoin_address: str
+    status: str # Should be "pending_deposit" initially
+    message: str = "Intention registered. Please deposit wCAS to the bridge address from your specified Polygon address."
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+# --- Internal API Schemas ---
+
+# For wCAS Minting (Cascoin -> Polygon)
+class WCASMintRequest(BaseModel):
+    cas_deposit_id: int
+    amount_to_mint: float
+    recipient_polygon_address: str
+    cas_deposit_address: str # For logging/verification
+
+class WCASMintResponse(BaseModel):
+    status: str
+    message: str
+    polygon_mint_tx_hash: Optional[str] = None
+    cas_deposit_id: int
+
+# For CAS Release (Polygon -> Cascoin)
+class CASReleaseRequest(BaseModel):
+    polygon_transaction_id: int
+    amount_to_release: float # Should match the wCAS amount from PolygonTransaction
+    recipient_cascoin_address: str # Should match user_cascoin_address_request from PolygonTransaction
+
+class CASReleaseResponse(BaseModel):
+    status: str
+    message: str
+    cascoin_release_tx_hash: Optional[str] = None
+    polygon_transaction_id: int
+
 # CasDeposit Schemas
 class CasDepositRequest(BaseModel): # Renamed from CasDepositBase for clarity
     polygon_address: str = Field(..., description="User's Polygon address where wCAS will be minted.")

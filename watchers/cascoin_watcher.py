@@ -1,24 +1,34 @@
 import time
 import json
 import requests # For making HTTP requests to backend and Cascoin RPC
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, MetaData
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import sessionmaker, Session as DbSession # Renamed to avoid conflict
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 import logging
+import os # Added for environment variable access
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-CASCOIN_RPC_URL = "http://localhost:18332" # Example Cascoin RPC URL
-CASCOIN_RPC_USER = "your_cascoin_rpc_user"
-CASCOIN_RPC_PASSWORD = "your_cascoin_rpc_password"
-BRIDGE_API_URL = "http://localhost:8000/api" # Backend API
-DATABASE_URL = "sqlite:///./bridge.db" # Must match backend's DB
-POLL_INTERVAL_SECONDS = 60
-CONFIRMATIONS_REQUIRED = 6
+# IMPORTANT: Review and set these via environment variables for production.
+CASCOIN_RPC_URL = os.getenv("CASCOIN_RPC_URL", "http://localhost:18332")
+CASCOIN_RPC_USER = os.getenv("CASCOIN_RPC_USER", "your_cascoin_rpc_user")
+CASCOIN_RPC_PASSWORD = os.getenv("CASCOIN_RPC_PASSWORD", "your_cascoin_rpc_password") # Sensitive: Set in ENV
+
+# URL for the backend's internal API endpoints
+BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://localhost:8000/internal")
+
+# Database URL - should match the backend's configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bridge.db")
+
+# How often to poll the Cascoin node for new transactions (in seconds)
+POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
+
+# Number of confirmations on Cascoin blockchain before a deposit is considered final
+CONFIRMATIONS_REQUIRED = int(os.getenv("CONFIRMATIONS_REQUIRED", "6"))
 
 # --- Database Setup ---
 # The watcher accesses the DB directly. Ensure it uses the same bridge.db file.
@@ -45,6 +55,22 @@ class CasDeposit(Base):
 
     def __repr__(self):
         return f"<CasDeposit(id={self.id}, cas_addr='{self.cascoin_deposit_address}', status='{self.status}')>"
+
+# Definition for ProcessedCascoinTxs table (mirrored from database.models)
+class ProcessedCascoinTxs(Base):
+    __tablename__ = "processed_cascoin_txs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cascoin_txid = Column(String, index=True, nullable=False)
+    cascoin_vout_index = Column(Integer, nullable=False)
+    cas_deposit_id = Column(Integer, ForeignKey("cas_deposits.id"), nullable=False)
+    amount_received = Column(Float, nullable=False)
+    processed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint('cascoin_txid', 'cascoin_vout_index', name='_cascoin_txid_vout_uc'),)
+
+    def __repr__(self):
+        return f"<ProcessedCascoinTxs(id={self.id}, txid='{self.cascoin_txid}', vout_index={self.cascoin_vout_index})>"
 
 # --- Cascoin JSON-RPC Interaction ---
 def cascoin_rpc_call(method, params=[]):
@@ -74,114 +100,154 @@ def cascoin_rpc_call(method, params=[]):
         logger.error(f"Error decoding Cascoin RPC response for {method}. Response: {response.text if 'response' in locals() else 'N/A'}")
         return None
 
-# --- Backend API Interaction (Placeholder for Minting Trigger) ---
-def trigger_wcas_minting(deposit_id: int, amount: float, target_polygon_address: str, cas_deposit_address: str):
-    logger.info(f"Attempting to trigger wCAS minting for CasDeposit ID: {deposit_id}, Amount: {amount}, Target Polygon Address: {target_polygon_address}")
-    # This function will be expanded in Step 5: wCAS Minting Service
-    # For now, it's a placeholder.
-    # The actual implementation would likely involve an internal API call to the backend,
-    # which then securely calls the smart contract.
-    # Example:
-    # mint_payload = {
-    #     "cas_deposit_id": deposit_id, # To link the mint operation
-    #     "amount_to_mint": amount,
-    #     "recipient_polygon_address": target_polygon_address,
-    #     "cas_deposit_address": cas_deposit_address # For logging/verification
-    # }
-    # try:
-    #     response = requests.post(f"{BRIDGE_API_URL}/internal/initiate_wcas_mint", json=mint_payload, timeout=15)
-    #     response.raise_for_status()
-    #     logger.info(f"Successfully initiated wCAS minting for CasDeposit ID {deposit_id}. Response: {response.json()}")
-    #     return True
-    # except requests.exceptions.RequestException as e:
-    #     logger.error(f"Failed to initiate wCAS minting for CasDeposit ID {deposit_id}: {e}")
-    #     return False
-    logger.info(f"[SIMULATION] Minting trigger successful for deposit ID {deposit_id}")
-    return True # Simulate success for now
+# --- Backend API Interaction ---
+def trigger_wcas_minting(deposit_id: int, amount_to_mint: float, recipient_polygon_address: str, cas_deposit_address: str):
+    """
+    Triggers the wCAS minting process by calling the backend's internal API.
+    """
+    logger.info(f"Attempting to trigger wCAS minting for CasDeposit ID: {deposit_id}, Amount: {amount_to_mint}, Target Polygon Address: {recipient_polygon_address}")
+
+    mint_payload = {
+        "cas_deposit_id": deposit_id,
+        "amount_to_mint": amount_to_mint,
+        "recipient_polygon_address": recipient_polygon_address,
+        "cas_deposit_address": cas_deposit_address # For logging/verification by backend
+    }
+
+    # Ensure BRIDGE_API_URL points to the internal API, e.g., http://localhost:8000/internal
+    api_endpoint = f"{BRIDGE_API_URL}/initiate_wcas_mint"
+
+    try:
+        response = requests.post(api_endpoint, json=mint_payload, timeout=15)
+        response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
+        logger.info(f"Successfully initiated wCAS minting for CasDeposit ID {deposit_id}. Backend response: {response.json()}")
+        return True
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout calling backend API to initiate minting for CasDeposit ID {deposit_id} at {api_endpoint}")
+        return False
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Connection error calling backend API to initiate minting for CasDeposit ID {deposit_id} at {api_endpoint}")
+        return False
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP error from backend API for CasDeposit ID {deposit_id}: {e}. Response: {e.response.text if e.response else 'No response text'}")
+        return False
+    except Exception as e:
+        logger.error(f"Generic error calling backend API for CasDeposit ID {deposit_id}: {e}", exc_info=True)
+        return False
 
 # --- Watcher Logic ---
-def get_pending_deposit_addresses(db: DbSession):
-    return db.query(CasDeposit).filter(CasDeposit.status == "pending").all()
-
-def process_confirmed_deposit(db: DbSession, deposit_record: CasDeposit, amount_received: float):
-    logger.info(f"Processing confirmed deposit for {deposit_record.cascoin_deposit_address} (ID: {deposit_record.id}), amount: {amount_received}")
-    deposit_record.received_amount = amount_received
-    deposit_record.status = "confirmed_cas" # Status: deposit confirmed on Cascoin
-    deposit_record.updated_at = func.now()
-    # db.commit() # Commit will be handled by the calling function after mint trigger
-
-    if trigger_wcas_minting(deposit_record.id, amount_received, deposit_record.polygon_address, deposit_record.cascoin_deposit_address):
-        deposit_record.status = "mint_triggered" # Status: minting process successfully triggered
-        logger.info(f"CasDeposit ID {deposit_record.id} status updated to 'mint_triggered'.")
-    else:
-        deposit_record.status = "mint_trigger_failed" # Status: problem calling the mint service
-        logger.error(f"Failed to trigger minting for CasDeposit ID {deposit_record.id}. Status set to 'mint_trigger_failed'.")
-    db.commit()
-
-
 def check_cascoin_transactions():
-    db = SessionLocal()
+    db: DbSession = SessionLocal()
     try:
         logger.info("Checking for new Cascoin deposits...")
-        pending_deposits = get_pending_deposit_addresses(db)
+
+        # Get CasDeposit records with "pending" status
+        pending_deposits = db.query(CasDeposit).filter(CasDeposit.status == "pending").all()
+
         if not pending_deposits:
             logger.info("No pending Cascoin deposits to check.")
             return
 
-        address_to_deposit_map = {dep.cascoin_deposit_address: dep for dep in pending_deposits}
-        logger.info(f"Monitoring {len(address_to_deposit_map)} Cascoin addresses: {list(address_to_deposit_map.keys())}")
+        logger.info(f"Found {len(pending_deposits)} pending deposit(s). Checking their Cascoin addresses...")
 
-        current_block_height_response = cascoin_rpc_call("getblockcount")
-        if not current_block_height_response or 'result' not in current_block_height_response:
-            logger.warning("Could not get current Cascoin block height.")
-            return
-        current_block_height = current_block_height_response['result']
-        logger.info(f"Current Cascoin block height: {current_block_height}")
+        for deposit_record in pending_deposits:
+            address_str = deposit_record.cascoin_deposit_address
+            logger.info(f"Checking address: {address_str} for CasDeposit ID: {deposit_record.id}")
 
-        # This is the core logic that needs to be robust for a Bitcoin-like chain.
-        # Option 1: If addresses are imported into the node's wallet (recommended for UTXO chains)
-        #   - Use `listunspent(minconf, maxconf, ["address1", ...])` or `listtransactions`
-        # Option 2: Scan blocks (less efficient for many addresses if not indexed by node)
-        #   - `getblockhash(height)` -> `getblock(hash, verbosity=2)` -> iterate `tx` -> iterate `vout`
-        # Option 3: Use a block explorer API if available (adds external dependency)
+            # Call listunspent for the specific address
+            # Parameters: [minconf, maxconf, ["address",...], include_unsafe, query_options]
+            # We want confirmed UTXOs, so include_unsafe = False
+            # query_options can be omitted or set to default if not needed.
+            # Note: some nodes might have slightly different param order or requirements for listunspent.
+            # This assumes a common Bitcoin Core-like API.
+            listunspent_params = [CONFIRMATIONS_REQUIRED, 9999999, [address_str], False]
 
-        # Placeholder simulation:
-        # For now, we'll just iterate and simulate finding one.
-        # In a real implementation, you'd query the node for UTXOs or transactions related to these addresses.
-        for address_str, deposit_record in address_to_deposit_map.items():
-            logger.debug(f"Simulating check for address: {address_str}")
-            # --- !!! CRITICAL PLACEHOLDER START !!! ---
-            # This section needs to be replaced with actual Cascoin node interaction
-            # to find transactions for `address_str` and check their confirmations.
-            #
-            # Example (Conceptual - RPC calls depend on Cascoin's specific API):
-            #
-            # unspent_txs_response = cascoin_rpc_call("listunspent", [CONFIRMATIONS_REQUIRED, 9999999, [address_str]])
-            # if unspent_txs_response and unspent_txs_response.get('result'):
-            #     for utxo in unspent_txs_response['result']:
-            #         if utxo['address'] == address_str and utxo['confirmations'] >= CONFIRMATIONS_REQUIRED:
-            #             amount = utxo['amount']
-            #             txid = utxo['txid'] # Important for tracking
-            #             logger.info(f"Found confirmed UTXO for {address_str}: Amount {amount}, TXID {txid}")
-            #             # Ensure this UTXO hasn't been processed before (e.g. by checking against a list of processed txids)
-            #             process_confirmed_deposit(db, deposit_record, amount)
-            #             # Potentially break if only one deposit per address is expected, or aggregate amounts.
-            #             break # Process one UTXO per address for now
-            #
-            # --- !!! CRITICAL PLACEHOLDER END !!! ---
+            rpc_response = cascoin_rpc_call("listunspent", listunspent_params)
 
-            # Simulate finding a deposit for the first pending address for dev purposes
-            if deposit_record.id % 2 == 1: # Simulate for odd IDs to see some action
-                 # Simulate that this one gets a "find"
-                simulated_amount_received = 0.5 # Example amount
-                logger.info(f"SIMULATING: Found confirmed deposit of {simulated_amount_received} CAS for {address_str} (ID: {deposit_record.id})")
-                process_confirmed_deposit(db, deposit_record, simulated_amount_received)
-                # To prevent it from being picked up again in next cycle in this simulation:
-                # deposit_record.status = "mint_triggered" # or whatever process_confirmed_deposit sets it to
-                # db.commit() # commit this change
-                break # Simulate only one find per run to make logs cleaner
+            if rpc_response is None: # Error logged by cascoin_rpc_call
+                logger.warning(f"RPC call 'listunspent' failed for address {address_str}. Skipping this address for now.")
+                continue
 
-        logger.info("Finished Cascoin checking cycle.")
+            # The 'result' field should contain the list of UTXOs
+            # If rpc_response['error'] is not None, it should have been handled by _rpc_call and returned None.
+            # However, an empty result [] is a valid response if no UTXOs are found.
+            unspent_txs = rpc_response # In Cascoin, rpc_response *is* the result array if no error. Adjust if it's {'result': []}
+
+            if not isinstance(unspent_txs, list):
+                logger.error(f"Unexpected format for listunspent result for address {address_str}. Expected list, got: {type(unspent_txs)}. Response: {unspent_txs}")
+                continue
+
+            if not unspent_txs:
+                logger.info(f"No confirmed UTXOs found for address {address_str} with {CONFIRMATIONS_REQUIRED} confirmations.")
+                continue
+
+            logger.info(f"Found {len(unspent_txs)} UTXO(s) for address {address_str} meeting {CONFIRMATIONS_REQUIRED} confirmations.")
+
+            for utxo in unspent_txs:
+                try:
+                    txid = utxo.get('txid')
+                    vout_index = utxo.get('vout')
+                    amount_received_cas = utxo.get('amount') # Assuming 'amount' is in CAS
+                    actual_confirmations = utxo.get('confirmations')
+
+                    if not all([txid, isinstance(vout_index, int), isinstance(amount_received_cas, (float, int))]):
+                        logger.warning(f"Skipping UTXO with incomplete data for address {address_str}: txid={txid}, vout={vout_index}, amount={amount_received_cas}")
+                        continue
+
+                    logger.info(f"Processing UTXO: TXID={txid}, Vout={vout_index}, Amount={amount_received_cas}, Confirmations={actual_confirmations} for Deposit ID {deposit_record.id}")
+
+                    # Check if this UTXO has already been processed
+                    existing_processed_tx = db.query(ProcessedCascoinTxs).filter_by(
+                        cascoin_txid=txid,
+                        cascoin_vout_index=vout_index
+                    ).first()
+
+                    if existing_processed_tx:
+                        logger.info(f"UTXO {txid}-{vout_index} already processed for CasDeposit ID {existing_processed_tx.cas_deposit_id}. Skipping.")
+                        continue
+
+                    # Store this UTXO as processed
+                    new_processed_tx = ProcessedCascoinTxs(
+                        cascoin_txid=txid,
+                        cascoin_vout_index=vout_index,
+                        cas_deposit_id=deposit_record.id,
+                        amount_received=amount_received_cas
+                    )
+                    db.add(new_processed_tx)
+
+                    # Update CasDeposit record
+                    # For now, assuming one UTXO per deposit triggers minting.
+                    # If aggregation is needed, this logic would change: accumulate amounts,
+                    # and only trigger minting when a threshold is met or after a certain time.
+                    deposit_record.received_amount = amount_received_cas # Overwrites if multiple UTXOs are found, simple model for now
+                    deposit_record.status = "cas_confirmed_pending_mint" # New status
+                    deposit_record.updated_at = func.now()
+
+                    logger.info(f"CasDeposit ID {deposit_record.id} updated: amount={amount_received_cas}, status='cas_confirmed_pending_mint'")
+
+                    # Trigger wCAS minting via backend API
+                    mint_triggered = trigger_wcas_minting(
+                        deposit_id=deposit_record.id,
+                        amount_to_mint=amount_received_cas, # Assuming 1 CAS = 1 wCAS
+                        recipient_polygon_address=deposit_record.polygon_address,
+                        cas_deposit_address=deposit_record.cascoin_deposit_address
+                    )
+
+                    if mint_triggered:
+                        deposit_record.status = "mint_triggered" # Or "mint_initiated"
+                        logger.info(f"wCAS minting successfully triggered for CasDeposit ID {deposit_record.id}.")
+                    else:
+                        deposit_record.status = "mint_trigger_failed"
+                        logger.error(f"Failed to trigger wCAS minting for CasDeposit ID {deposit_record.id}. Status set to 'mint_trigger_failed'.")
+
+                    db.commit() # Commit changes for this UTXO (ProcessedCascoinTxs and CasDeposit update)
+                    logger.info(f"Successfully processed and committed UTXO {txid}-{vout_index} for CasDeposit ID {deposit_record.id}.")
+
+                except Exception as e_utxo:
+                    logger.error(f"Error processing UTXO {utxo.get('txid')}-{utxo.get('vout')} for deposit {deposit_record.id}: {e_utxo}", exc_info=True)
+                    db.rollback() # Rollback changes for this specific UTXO
+
+        logger.info("Finished Cascoin checking cycle for pending deposits.")
 
     except Exception as e:
         logger.error(f"Error during Cascoin checking cycle: {e}", exc_info=True)

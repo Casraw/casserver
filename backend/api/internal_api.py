@@ -1,72 +1,235 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from backend import crud
-from backend.database import get_db
-from backend.services.polygon_service import PolygonService
-from pydantic import BaseModel, Field
-import logging
 from typing import Optional
+import logging # Added for logging
 
+from backend import schemas, crud # schemas for request/response models, crud for DB ops
+from backend.database import get_db # get_db for dependency injection
+from backend.services.polygon_service import PolygonService
+from backend.services.cascoin_service import CascoinService # Added CascoinService
+from backend.config import settings # For INTERNAL_API_KEY
+
+# Initialize logger for this module
 logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
-polygon_service_instance: Optional[PolygonService] = None
-try:
-    polygon_service_instance = PolygonService()
-    logger.info("PolygonService initialized successfully for internal_api.")
-except Exception as e:
-    logger.error(f"CRITICAL: Failed to initialize PolygonService for internal_api: {e}. Minting endpoints will fail.", exc_info=True)
+# --- Helper function for API Key Check ---
+def verify_api_key(x_internal_api_key: Optional[str] = Header(None, alias="X-Internal-API-Key")):
+    # Ensure settings.INTERNAL_API_KEY has a value and is not the default placeholder if in prod.
+    # For now, direct comparison.
+    if not settings.INTERNAL_API_KEY or settings.INTERNAL_API_KEY == "bridge_internal_secret_key_change_me_!!!":
+        logger.critical("INTERNAL_API_KEY is not set or is using the default placeholder. Internal API is insecure.")
+        # In a production environment, you might want to deny all requests if the key is default.
+        # For development, we might allow it but log a severe warning.
+        # For this exercise, we'll proceed if it's default but ensure it's checked against.
 
-class MintRequest(BaseModel):
-    cas_deposit_id: int = Field(..., description="ID of the CasDeposit record in the bridge database")
+    if not x_internal_api_key or x_internal_api_key != settings.INTERNAL_API_KEY:
+        logger.warning(f"Invalid or missing internal API key. Provided key: '{x_internal_api_key}'")
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid or missing internal API key.")
+    return True
 
-class MintResponse(BaseModel):
-    message: str
-    cas_deposit_id: int
-    status: str
-    polygon_tx_hash: Optional[str] = None
+# --- Endpoint to initiate wCAS Minting ---
+@router.post("/initiate_wcas_mint", response_model=schemas.WCASMintResponse)
+async def initiate_wcas_mint(
+    request: schemas.WCASMintRequest,
+    db: Session = Depends(get_db),
+    api_key_verified: bool = Depends(verify_api_key) # API Key dependency
+):
+    """
+    Internal endpoint called by the Cascoin watcher to initiate wCAS minting on Polygon
+    after a Cascoin deposit has been confirmed.
+    """
+    logger_prefix = f"Minting for CasDeposit ID {request.cas_deposit_id}: "
+    logger.info(f"{logger_prefix}Received request: {request.model_dump_json(indent=2)}")
 
-@router.post("/initiate_wcas_mint", response_model=MintResponse, tags=["Internal Bridge Operations"])
-async def initiate_wcas_mint(request: MintRequest, db: Session = Depends(get_db)):
-    logger.info(f"Received internal request to mint wCAS for CasDeposit ID: {request.cas_deposit_id}")
+    deposit = crud.get_cas_deposit_by_id(db, deposit_id=request.cas_deposit_id)
 
-    if not polygon_service_instance:
-        logger.error("PolygonService not available. Cannot process minting request.")
-        raise HTTPException(status_code=503, detail="Minting service is currently unavailable.")
-
-    deposit = crud.get_cas_deposit_by_id(db, request.cas_deposit_id)
     if not deposit:
-        raise HTTPException(status_code=404, detail=f"Cascoin deposit record ID {request.cas_deposit_id} not found.")
+        # Attempt to update status if possible, though record doesn't exist. This won't do anything.
+        # crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", None, None)
+        logger.error(f"{logger_prefix}CasDeposit record not found.")
+        raise HTTPException(status_code=404, detail=f"{logger_prefix}CasDeposit record not found.")
 
-    if deposit.status not in ["confirmed_cas", "mint_trigger_failed", "minting_failed"]:
-        raise HTTPException(status_code=400, detail=f"Deposit status '{deposit.status}' not valid for minting.")
+    # Validations
+    # Valid statuses for initiating a mint:
+    # "cas_confirmed_pending_mint" - fresh from watcher
+    # "mint_trigger_failed" - watcher failed to call this API previously
+    # "mint_failed" - PolygonService failed previously, retrying
+    valid_initial_statuses = ["cas_confirmed_pending_mint", "mint_trigger_failed", "mint_failed"]
+    if deposit.status not in valid_initial_statuses:
+        # If mint_tx_hash is present, it means it was at least submitted.
+        if deposit.mint_tx_hash and deposit.status in ["mint_submitted", "mint_confirmed_on_poly"]:
+             logger.info(f"{logger_prefix}Minting already processed or in progress. Status: {deposit.status}, TxHash: {deposit.mint_tx_hash}")
+             return schemas.WCASMintResponse(
+                status="skipped",
+                message=f"Minting already processed or in progress. Status: {deposit.status}",
+                polygon_mint_tx_hash=deposit.mint_tx_hash,
+                cas_deposit_id=request.cas_deposit_id
+            )
+        logger.warning(f"{logger_prefix}Invalid deposit status for minting: {deposit.status}. Expected one of {valid_initial_statuses}.")
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Invalid deposit status for minting: {deposit.status}")
 
-    if deposit.received_amount is None or deposit.received_amount <= 0:
-        raise HTTPException(status_code=400, detail="Deposit received_amount is missing or zero.")
+    if deposit.polygon_address.lower() != request.recipient_polygon_address.lower():
+        logger.error(f"{logger_prefix}Recipient Polygon address mismatch. DB: {deposit.polygon_address}, Request: {request.recipient_polygon_address}")
+        crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Recipient Polygon address mismatch.")
 
-    recipient_polygon_address = deposit.polygon_address
-    amount_cas_float = deposit.received_amount
+    if request.amount_to_mint <= 0:
+        logger.error(f"{logger_prefix}Invalid mint amount: {request.amount_to_mint}. Must be positive.")
+        crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Invalid mint amount. Must be positive.")
 
-    crud.update_cas_deposit_status_and_mint_hash(db, deposit.id, "minting_initiated")
-    logger.info(f"CasDeposit ID {deposit.id} status 'minting_initiated'. Minting {amount_cas_float} wCAS for {recipient_polygon_address}.")
+    # Compare float amounts with a tolerance, or ensure they are handled consistently (e.g. as strings or Decimals)
+    # For this example, direct comparison, assuming watcher sends exactly deposit.received_amount
+    if abs(request.amount_to_mint - deposit.received_amount) > 1e-9: # Tolerance for float comparison
+        logger.error(f"{logger_prefix}Mismatched mint amount. Requested: {request.amount_to_mint}, Expected from DB: {deposit.received_amount}")
+        crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Mismatched mint amount.")
 
-    tx_hash = polygon_service_instance.mint_wcas(
-        to_address=recipient_polygon_address,
-        amount_cas_float=amount_cas_float
-    )
+    # Initialize PolygonService
+    try:
+        polygon_service = PolygonService()
+        logger.info(f"{logger_prefix}PolygonService initialized successfully.")
+    except Exception as e:
+        logger.error(f"{logger_prefix}Failed to initialize PolygonService: {e}", exc_info=True)
+        # Not updating deposit status here as this is a configuration/service init issue.
+        raise HTTPException(status_code=500, detail=f"{logger_prefix}Failed to initialize PolygonService: {str(e)}")
 
-    if tx_hash:
-        updated_deposit = crud.update_cas_deposit_status_and_mint_hash(db, deposit.id, "minting_submitted", tx_hash)
-        status_after_update = updated_deposit.status if updated_deposit else "minting_submitted"
-        logger.info(f"wCAS mint tx submitted for CasDeposit ID {deposit.id}. Tx Hash: {tx_hash}. Status: {status_after_update}")
-        return MintResponse(
-            message="wCAS minting transaction successfully submitted.",
-            cas_deposit_id=deposit.id,
-            status=status_after_update,
-            polygon_tx_hash=tx_hash
+    # Call PolygonService to mint wCAS
+    try:
+        logger.info(f"{logger_prefix}Calling PolygonService.mint_wcas for recipient {deposit.polygon_address} with amount {deposit.received_amount}")
+        mint_tx_hash = polygon_service.mint_wcas(
+            recipient_address=deposit.polygon_address,
+            amount_cas=deposit.received_amount
         )
-    else:
-        updated_deposit = crud.update_cas_deposit_status_and_mint_hash(db, deposit.id, "minting_failed")
-        status_after_update = updated_deposit.status if updated_deposit else "minting_failed"
-        logger.error(f"wCAS minting failed for CasDeposit ID {deposit.id}. Status: {status_after_update}")
-        raise HTTPException(status_code=500, detail="Failed to submit wCAS minting transaction.")
+
+        if mint_tx_hash:
+            logger.info(f"{logger_prefix}wCAS minting transaction submitted to Polygon. TxHash: {mint_tx_hash}")
+            crud.update_cas_deposit_status_and_mint_hash(
+                db=db,
+                deposit_id=request.cas_deposit_id,
+                new_status="mint_submitted",
+                mint_tx_hash=mint_tx_hash,
+                received_amount=deposit.received_amount
+            )
+            return schemas.WCASMintResponse(
+                status="success",
+                message="wCAS minting transaction submitted to Polygon.",
+                polygon_mint_tx_hash=mint_tx_hash,
+                cas_deposit_id=request.cas_deposit_id
+            )
+        else:
+            logger.error(f"{logger_prefix}PolygonService.mint_wcas did not return a transaction hash.")
+            crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
+            return schemas.WCASMintResponse( # Return a 200 OK with error status, or raise HTTPException
+                status="error",
+                message="Failed to submit wCAS minting transaction. PolygonService did not return a hash.",
+                polygon_mint_tx_hash=None,
+                cas_deposit_id=request.cas_deposit_id
+            )
+
+    except Exception as e:
+        logger.error(f"{logger_prefix}Unexpected error during wCAS minting: {e}", exc_info=True)
+        crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
+        raise HTTPException(status_code=500, detail=f"{logger_prefix}An unexpected error occurred: {str(e)}")
+
+
+# --- Endpoint to initiate CAS Release (from wCAS on Polygon) ---
+@router.post("/initiate_cas_release", response_model=schemas.CASReleaseResponse)
+async def initiate_cas_release(
+    request: schemas.CASReleaseRequest,
+    db: Session = Depends(get_db),
+    api_key_verified: bool = Depends(verify_api_key) # API Key dependency
+):
+    """
+    Internal endpoint called by the Polygon watcher to initiate CAS release
+    after a wCAS deposit to the bridge has been confirmed on Polygon.
+    """
+    logger_prefix = f"CAS Release for Polygon Tx ID {request.polygon_transaction_id}: "
+    logger.info(f"{logger_prefix}Received request: {request.model_dump_json(indent=2)}")
+
+    poly_tx = crud.get_polygon_transaction_by_id(db, tx_id=request.polygon_transaction_id)
+
+    if not poly_tx:
+        logger.error(f"{logger_prefix}PolygonTransaction record not found.")
+        # Cannot update status if record not found, but this indicates a logic error in caller or data issue.
+        raise HTTPException(status_code=404, detail=f"{logger_prefix}PolygonTransaction record not found.")
+
+    # Validations
+    valid_initial_statuses = ["wcas_confirmed", "cas_release_trigger_failed", "cas_release_failed"]
+    if poly_tx.status not in valid_initial_statuses:
+        if poly_tx.cas_release_tx_hash and poly_tx.status in ["cas_release_submitted", "cas_released_on_cascoin"]:
+            logger.info(f"{logger_prefix}CAS release already processed or in progress. Status: {poly_tx.status}, Cas TxHash: {poly_tx.cas_release_tx_hash}")
+            return schemas.CASReleaseResponse(
+                status="skipped",
+                message=f"CAS release already processed or in progress. Status: {poly_tx.status}",
+                cascoin_release_tx_hash=poly_tx.cas_release_tx_hash,
+                polygon_transaction_id=request.polygon_transaction_id
+            )
+        logger.warning(f"{logger_prefix}Invalid PolygonTransaction status for CAS release: {poly_tx.status}. Expected one of {valid_initial_statuses}.")
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Invalid transaction status for CAS release: {poly_tx.status}")
+
+    if poly_tx.user_cascoin_address_request.lower() != request.recipient_cascoin_address.lower():
+        logger.error(f"{logger_prefix}Recipient Cascoin address mismatch. DB: {poly_tx.user_cascoin_address_request}, Request: {request.recipient_cascoin_address}")
+        crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed")
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Recipient Cascoin address mismatch.")
+
+    if poly_tx.user_cascoin_address_request == "UNKNOWN_NO_INTENTION":
+        logger.error(f"{logger_prefix}Target Cascoin address is unknown (no prior intention logged). Cannot proceed with CAS release.")
+        crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed") # Keep as failed
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Target Cascoin address is unknown. Cannot release CAS.")
+
+    if request.amount_to_release <= 0:
+        logger.error(f"{logger_prefix}Invalid release amount: {request.amount_to_release}. Must be positive.")
+        crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed")
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Invalid release amount. Must be positive.")
+
+    if abs(request.amount_to_release - poly_tx.amount) > 1e-9: # Tolerance for float comparison
+        logger.error(f"{logger_prefix}Mismatched release amount. Requested: {request.amount_to_release}, Expected from DB: {poly_tx.amount}")
+        crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed")
+        raise HTTPException(status_code=400, detail=f"{logger_prefix}Mismatched release amount.")
+
+    # Initialize CascoinService
+    try:
+        cascoin_service = CascoinService()
+        logger.info(f"{logger_prefix}CascoinService initialized successfully.")
+    except Exception as e:
+        logger.error(f"{logger_prefix}Failed to initialize CascoinService: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"{logger_prefix}Failed to initialize CascoinService: {str(e)}")
+
+    # Call CascoinService to send CAS
+    try:
+        logger.info(f"{logger_prefix}Calling CascoinService.send_cas to {poly_tx.user_cascoin_address_request} with amount {poly_tx.amount}")
+        cas_tx_hash = cascoin_service.send_cas(
+            to_address=poly_tx.user_cascoin_address_request,
+            amount=poly_tx.amount
+        )
+
+        if cas_tx_hash:
+            logger.info(f"{logger_prefix}CAS release transaction submitted to Cascoin. TxHash: {cas_tx_hash}")
+            crud.update_polygon_transaction_status_and_cas_hash(
+                db=db,
+                polygon_tx_id=poly_tx.id,
+                new_status="cas_release_submitted",
+                cas_tx_hash=cas_tx_hash
+            )
+            return schemas.CASReleaseResponse(
+                status="success",
+                message="CAS release transaction submitted to Cascoin.",
+                cascoin_release_tx_hash=cas_tx_hash,
+                polygon_transaction_id=request.polygon_transaction_id
+            )
+        else:
+            logger.error(f"{logger_prefix}CascoinService.send_cas did not return a transaction hash.")
+            crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed")
+            return schemas.CASReleaseResponse(
+                status="error",
+                message="Failed to submit CAS release transaction. CascoinService did not return a hash.",
+                cascoin_release_tx_hash=None,
+                polygon_transaction_id=request.polygon_transaction_id
+            )
+    except Exception as e:
+        logger.error(f"{logger_prefix}Unexpected error during CAS release: {e}", exc_info=True)
+        crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed")
+        raise HTTPException(status_code=500, detail=f"{logger_prefix}An unexpected error occurred: {str(e)}")
