@@ -26,6 +26,10 @@
 
         <form id="polyToCasForm">
             <div>
+                <label for="userPolygonAddress">Your Polygon Address (from which you will send wCAS):</label>
+                <input type="text" id="userPolygonAddress" name="userPolygonAddress" required placeholder="0x...">
+            </div>
+            <div>
                 <label for="cascoinAddress">Your Cascoin Address (to receive CAS):</label>
                 <input type="text" id="cascoinAddress" name="cascoinAddress" required placeholder="Enter your Cascoin address">
             </div>
@@ -42,6 +46,8 @@
         document.getElementById('polyToCasForm').addEventListener('submit', async function(event) {
             event.preventDefault();
 
+            const userPolygonAddressInput = document.getElementById('userPolygonAddress');
+            const userPolygonAddress = userPolygonAddressInput.value.trim();
             const cascoinAddressInput = document.getElementById('cascoinAddress');
             const cascoinAddress = cascoinAddressInput.value.trim();
             const responseArea = document.getElementById('responseArea');
@@ -50,27 +56,43 @@
             responseArea.style.display = 'none';
             responseText.innerHTML = ''; // Clear previous messages
 
+            // Validate userPolygonAddress
+            if (!userPolygonAddress) {
+                responseText.innerHTML = '<span class="error">Polygon address cannot be empty.</span>';
+                responseArea.style.display = 'block';
+                return;
+            }
+            if (!userPolygonAddress.startsWith('0x')) {
+                responseText.innerHTML = '<span class="error">Polygon address must start with "0x".</span>';
+                responseArea.style.display = 'block';
+                return;
+            }
+            if (userPolygonAddress.length !== 42) {
+                responseText.innerHTML = '<span class="error">Polygon address must be 42 characters long.</span>';
+                responseArea.style.display = 'block';
+                return;
+            }
+
+            // Validate cascoinAddress
             if (!cascoinAddress) {
                 responseText.innerHTML = '<span class="error">Cascoin address cannot be empty.</span>';
                 responseArea.style.display = 'block';
                 return;
             }
-            // Add basic Cascoin address validation here if known, e.g. length
-            // For now, a non-empty check is performed.
-            // if (cascoinAddress.length < 20) { // Example: Minimum length check
-            //     responseText.innerHTML = '<span class="error">Please enter a valid Cascoin address.</span>';
-            //     responseArea.style.display = 'block';
-            //     return;
-            // }
+            if (cascoinAddress.length < 20) { // Example: Minimum length check
+                responseText.innerHTML = '<span class="error">Cascoin address must be at least 20 characters long.</span>';
+                responseArea.style.display = 'block';
+                return;
+            }
 
             try {
-                const response = await fetch('/api/request_wcas_deposit_address', {
+                const response = await fetch('/api/initiate_wcas_to_cas_return', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify({ user_cascoin_address: cascoinAddress })
+                    body: JSON.stringify({ user_polygon_address: userPolygonAddress, target_cascoin_address: cascoinAddress })
                 });
 
                 responseArea.style.display = 'block';
@@ -79,12 +101,16 @@
                 if (response.ok) {
                     responseText.innerHTML = `
                         <p class="success">${data.message || 'Successfully initiated transfer!'}</p>
-                        <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> ${data.bridge_wcas_deposit_address}</p>
-                        <p class="info">Your Cascoin Address: ${data.user_cascoin_address}</p>
-                        <p class="info">Please send your wCAS to the Polygon address above. Once confirmed, CAS will be sent to your Cascoin address.</p>
+                        <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> 0xYourBridgeWCASDepositAddressHereChangeMe</p>
+                        <p class="info">Your registered Polygon Address: ${data.user_polygon_address}</p>
+                        <p class="info">Your target Cascoin Address: ${data.target_cascoin_address}</p>
+                        <p class="info">Intention ID: ${data.id}</p>
+                        <p class="info">Status: ${data.status}</p>
+                        <p class="info">Registered At: ${new Date(data.created_at).toLocaleString()}</p>
+                        <p class="info">Please send your wCAS from your registered Polygon address to the Bridge wCAS Deposit Address above. Once confirmed, CAS will be sent to your target Cascoin address.</p>
                     `;
                 } else {
-                    responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to get wCAS deposit address.'} (Status: ${response.status})</span>`;
+                    responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to initiate transfer.'} (Status: ${response.status})</span>`;
                 }
             } catch (error) {
                 console.error('Request error:', error);
