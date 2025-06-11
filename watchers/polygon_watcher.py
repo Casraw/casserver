@@ -34,6 +34,7 @@ POLYGON_CONFIRMATIONS_REQUIRED = int(os.getenv("POLYGON_CONFIRMATIONS_REQUIRED",
 
 # URL for the backend's internal API endpoints (for triggering CAS release)
 BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://localhost:8000/internal")
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "bridge_internal_secret_key_change_me_!!!")
 
 # Post-process RPC URL (e.g. Infura often provides https_rpc... format)
 if POLYGON_RPC_URL.startswith("https_"):
@@ -143,24 +144,33 @@ def setup_web3_and_contract():
 # --- Backend API Interaction (Placeholder for CAS Release Trigger) ---
 def trigger_cas_release(polygon_tx_record_id: int, amount_wcas: float, target_cas_address: str):
     logger.info(f"Attempting to trigger CAS release for PolygonTransaction ID: {polygon_tx_record_id}, Amount: {amount_wcas} wCAS to {target_cas_address}")
-    # This function will be expanded in Step 7: CAS Release Service
-    # Example API call:
-    # release_payload = {
-    #     "polygon_transaction_id": polygon_tx_record_id,
-    #     "amount_cas_to_release": amount_wcas, # Assuming 1 wCAS = 1 CAS
-    #     "recipient_cas_address": target_cas_address
-    # }
-    # try:
-    #     response = requests.post(f"{BRIDGE_API_URL}/internal/initiate_cas_release", json=release_payload, timeout=15)
-    #     response.raise_for_status()
-    #     logger.info(f"Successfully initiated CAS release for Polygon Tx ID {polygon_tx_record_id}. Response: {response.json()}")
-    #     return True
-    # except requests.exceptions.RequestException as e:
-    #     logger.error(f"Failed to initiate CAS release for Polygon Tx ID {polygon_tx_record_id}: {e}")
-    #     return False
-    logger.info(f"[SIMULATION] CAS release trigger successful for Polygon Tx ID {polygon_tx_record_id}")
-    return True # Simulate success for now
 
+    release_payload = {
+        "polygon_transaction_id": polygon_tx_record_id,
+        "amount_to_release": amount_wcas, # Assuming 1 wCAS = 1 CAS
+        "recipient_cascoin_address": target_cas_address
+    }
+
+    headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+    api_endpoint = f"{BRIDGE_API_URL}/internal/initiate_cas_release"
+
+    try:
+        response = requests.post(api_endpoint, json=release_payload, headers=headers, timeout=15)
+        response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
+        logger.info(f"Successfully initiated CAS release for Polygon Tx ID {polygon_tx_record_id}. Backend response: {response.json()}")
+        return True
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout calling backend API to initiate CAS release for Polygon Tx ID {polygon_tx_record_id} at {api_endpoint}")
+        return False
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Connection error calling backend API to initiate CAS release for Polygon Tx ID {polygon_tx_record_id} at {api_endpoint}")
+        return False
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP error from backend API for Polygon Tx ID {polygon_tx_record_id}: {e}. Response: {e.response.text if e.response else 'No response text'}")
+        return False
+    except Exception as e: # Catch any other exceptions
+        logger.error(f"Generic error calling backend API for Polygon Tx ID {polygon_tx_record_id}: {e}", exc_info=True)
+        return False
 
 # --- Polygon Watcher Logic ---
 def get_last_processed_block(db: DbSession) -> int:

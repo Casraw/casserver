@@ -17,6 +17,13 @@ class User(UserBase):
     class Config:
         from_attributes = True
 
+# --- Bridge Configuration Information ---
+class BridgeConfigResponse(BaseModel):
+    bridge_wcas_deposit_address: str
+
+    class Config:
+        from_attributes = True
+
 # --- Schemas for wCAS to CAS Return Intention (Polygon -> Cascoin) ---
 
 class WCASReturnIntentionRequest(BaseModel):

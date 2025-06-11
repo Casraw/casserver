@@ -20,6 +20,7 @@ CASCOIN_RPC_PASSWORD = os.getenv("CASCOIN_RPC_PASSWORD", "your_cascoin_rpc_passw
 
 # URL for the backend's internal API endpoints
 BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://localhost:8000/internal")
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "bridge_internal_secret_key_change_me_!!!")
 
 # Database URL - should match the backend's configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bridge.db")
@@ -118,7 +119,8 @@ def trigger_wcas_minting(deposit_id: int, amount_to_mint: float, recipient_polyg
     api_endpoint = f"{BRIDGE_API_URL}/initiate_wcas_mint"
 
     try:
-        response = requests.post(api_endpoint, json=mint_payload, timeout=15)
+        headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+        response = requests.post(api_endpoint, json=mint_payload, headers=headers, timeout=15)
         response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
         logger.info(f"Successfully initiated wCAS minting for CasDeposit ID {deposit_id}. Backend response: {response.json()}")
         return True

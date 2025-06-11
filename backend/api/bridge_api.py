@@ -82,3 +82,13 @@ def initiate_wcas_to_cas_return(
     except Exception as e:
         # Log the exception e
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+@router.get("/api/bridge_config_info", response_model=schemas.BridgeConfigResponse)
+def get_bridge_config_info():
+    """
+    Provides public information about the bridge configuration,
+    such as the wCAS deposit address.
+    """
+    return schemas.BridgeConfigResponse(
+        bridge_wcas_deposit_address=settings.BRIDGE_WCAS_DEPOSIT_ADDRESS
+    )
