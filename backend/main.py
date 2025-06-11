@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from backend.api import bridge_api
 from backend.api import internal_api # Added
 from backend.database import engine #, Base (Models are in database.models now)
@@ -20,6 +22,13 @@ async def startup_event():
 app.include_router(bridge_api.router, prefix="/api", tags=["Bridge Operations"])
 app.include_router(internal_api.router, prefix="/internal", tags=["Internal Bridge Operations"]) # Added
 
+# Mount static files
+app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+
 @app.get("/")
-async def root():
-    return {"message": "Welcome to the Cascoin-Polygon Bridge API"}
+async def read_index():
+    return FileResponse("../frontend/cas_to_poly.html")
+
+@app.get("/poly_to_cas")
+async def read_poly_to_cas():
+    return FileResponse("../frontend/poly_to_cas.html")

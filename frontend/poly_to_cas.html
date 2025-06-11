@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cascoin to Polygon Bridge</title>
+    <title>Polygon to Cascoin Bridge</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
         .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
@@ -21,15 +21,15 @@
 </head>
 <body>
     <div class="container">
-        <h2>Cascoin (CAS) &rarr; Wrapped Cascoin (wCAS) on Polygon</h2>
-        <p class="nav-link"><a href="/poly_to_cas">Switch to Polygon &rarr; Cascoin Bridge</a></p>
+        <h2>Wrapped Cascoin (wCAS) on Polygon &rarr; Cascoin (CAS)</h2>
+        <p class="nav-link"><a href="/">Switch to Cascoin &rarr; Polygon Bridge</a></p>
 
-        <form id="casToPolyForm">
+        <form id="polyToCasForm">
             <div>
-                <label for="polygonAddress">Your Polygon Address (to receive wCAS):</label>
-                <input type="text" id="polygonAddress" name="polygonAddress" required placeholder="0x...">
+                <label for="cascoinAddress">Your Cascoin Address (to receive CAS):</label>
+                <input type="text" id="cascoinAddress" name="cascoinAddress" required placeholder="Enter your Cascoin address">
             </div>
-            <button type="submit">Get Cascoin Deposit Address</button>
+            <button type="submit">Get wCAS Deposit Address</button>
         </form>
 
         <div id="responseArea" style="display:none;">
@@ -39,36 +39,38 @@
     </div>
 
     <script>
-        document.getElementById('casToPolyForm').addEventListener('submit', async function(event) {
+        document.getElementById('polyToCasForm').addEventListener('submit', async function(event) {
             event.preventDefault();
 
-            const polygonAddressInput = document.getElementById('polygonAddress');
-            const polygonAddress = polygonAddressInput.value.trim();
+            const cascoinAddressInput = document.getElementById('cascoinAddress');
+            const cascoinAddress = cascoinAddressInput.value.trim();
             const responseArea = document.getElementById('responseArea');
             const responseText = document.getElementById('responseText');
 
             responseArea.style.display = 'none';
             responseText.innerHTML = ''; // Clear previous messages
 
-            if (!polygonAddress) {
-                responseText.innerHTML = '<span class="error">Polygon address cannot be empty.</span>';
+            if (!cascoinAddress) {
+                responseText.innerHTML = '<span class="error">Cascoin address cannot be empty.</span>';
                 responseArea.style.display = 'block';
                 return;
             }
-            if (!polygonAddress.startsWith('0x') || polygonAddress.length !== 42) { // Basic validation
-                responseText.innerHTML = '<span class="error">Please enter a valid Polygon address (starting with 0x and 42 characters long).</span>';
-                responseArea.style.display = 'block';
-                return;
-            }
+            // Add basic Cascoin address validation here if known, e.g. length
+            // For now, a non-empty check is performed.
+            // if (cascoinAddress.length < 20) { // Example: Minimum length check
+            //     responseText.innerHTML = '<span class="error">Please enter a valid Cascoin address.</span>';
+            //     responseArea.style.display = 'block';
+            //     return;
+            // }
 
             try {
-                const response = await fetch('/api/request_cascoin_deposit_address', {
+                const response = await fetch('/api/request_wcas_deposit_address', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify({ polygon_address: polygonAddress })
+                    body: JSON.stringify({ user_cascoin_address: cascoinAddress })
                 });
 
                 responseArea.style.display = 'block';
@@ -76,15 +78,13 @@
 
                 if (response.ok) {
                     responseText.innerHTML = `
-                        <p class="success">Successfully registered! Please deposit CAS to the address below:</p>
-                        <p><strong>Cascoin Deposit Address:</strong> ${data.cascoin_deposit_address}</p>
-                        <p class="info">Your Polygon Address: ${data.polygon_address}</p>
-                        <p class="info">Status: ${data.status}</p>
-                        <p class="info">Created At: ${new Date(data.created_at).toLocaleString()}</p>
-                        <p class="info">The wCAS tokens will be minted to your Polygon address after your CAS deposit receives enough confirmations.</p>
+                        <p class="success">${data.message || 'Successfully initiated transfer!'}</p>
+                        <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> ${data.bridge_wcas_deposit_address}</p>
+                        <p class="info">Your Cascoin Address: ${data.user_cascoin_address}</p>
+                        <p class="info">Please send your wCAS to the Polygon address above. Once confirmed, CAS will be sent to your Cascoin address.</p>
                     `;
                 } else {
-                    responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to get deposit address.'} (Status: ${response.status})</span>`;
+                    responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to get wCAS deposit address.'} (Status: ${response.status})</span>`;
                 }
             } catch (error) {
                 console.error('Request error:', error);
