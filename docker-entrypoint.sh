@@ -24,10 +24,32 @@ echo "Waiting for services to start..."
 sleep 15 # Give services time to initialize before running tests
 
 echo "-----------------------------------"
-echo "Running Pytest..."
-# Run tests and save the exit code
-pytest /app/integration_tests /app/tests -v
-TEST_EXIT_CODE=$?
+echo "Running Unit Tests (including Fee System Tests)..."
+echo "Test directories: /app/tests (unit tests), /app/integration_tests (integration tests)"
+echo "-----------------------------------"
+
+# Run unit tests first (including fee system tests)
+echo "Running Unit Tests..."
+pytest /app/tests -v --tb=short
+UNIT_TEST_EXIT_CODE=$?
+
+echo "-----------------------------------"
+echo "Running Integration Tests..."
+pytest /app/integration_tests -v --tb=short
+INTEGRATION_TEST_EXIT_CODE=$?
+
+# Calculate overall test result
+if [ $UNIT_TEST_EXIT_CODE -eq 0 ] && [ $INTEGRATION_TEST_EXIT_CODE -eq 0 ]; then
+    TEST_EXIT_CODE=0
+    echo "-----------------------------------"
+    echo "✅ ALL TESTS PASSED!"
+else
+    TEST_EXIT_CODE=1
+    echo "-----------------------------------"
+    echo "❌ SOME TESTS FAILED"
+    echo "Unit tests exit code: $UNIT_TEST_EXIT_CODE"
+    echo "Integration tests exit code: $INTEGRATION_TEST_EXIT_CODE"
+fi
 echo "-----------------------------------"
 
 echo "Cleaning up background processes..."

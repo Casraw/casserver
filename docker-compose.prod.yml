@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (empfohlen für Produktion statt SQLite)
+  postgres:
+    image: postgres:15
+    container_name: cascoin-bridge-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cascoin_bridge
+      POSTGRES_USER: bridge_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - bridge-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bridge_user -d cascoin_bridge"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Main Bridge Application
+  bridge-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: cascoin-bridge-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql://bridge_user:${POSTGRES_PASSWORD}@postgres:5432/cascoin_bridge
+      
+      # Security Settings - MUST BE SET IN .env FILE
+      MINTER_PRIVATE_KEY: ${MINTER_PRIVATE_KEY}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      
+      # Blockchain Node Configurations
+      CASCOIN_RPC_URL: ${CASCOIN_RPC_URL}
+      CASCOIN_RPC_USER: ${CASCOIN_RPC_USER}
+      CASCOIN_RPC_PASSWORD: ${CASCOIN_RPC_PASSWORD}
+      POLYGON_RPC_URL: ${POLYGON_RPC_URL}
+      
+      # Contract Settings
+      WCAS_CONTRACT_ADDRESS: ${WCAS_CONTRACT_ADDRESS}
+      WCAS_CONTRACT_ABI_JSON_PATH: smart_contracts/wCAS_ABI.json
+      BRIDGE_WCAS_DEPOSIT_ADDRESS: ${BRIDGE_WCAS_DEPOSIT_ADDRESS}
+      
+      # Operational Settings
+      DEFAULT_GAS_LIMIT: ${DEFAULT_GAS_LIMIT:-200000}
+      DEFAULT_MAX_PRIORITY_FEE_PER_GAS_GWEI: ${DEFAULT_MAX_PRIORITY_FEE_PER_GAS_GWEI:-2.0}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-10}
+      CONFIRMATIONS_REQUIRED: ${CONFIRMATIONS_REQUIRED:-12}
+      
+      # Fee System Configuration
+      DIRECT_PAYMENT_FEE_PERCENTAGE: ${DIRECT_PAYMENT_FEE_PERCENTAGE:-0.1}
+      DEDUCTED_FEE_PERCENTAGE: ${DEDUCTED_FEE_PERCENTAGE:-2.5}
+      MINIMUM_BRIDGE_AMOUNT: ${MINIMUM_BRIDGE_AMOUNT:-1.0}
+      MATIC_TO_CAS_EXCHANGE_RATE: ${MATIC_TO_CAS_EXCHANGE_RATE:-100.0}
+      MATIC_TO_WCAS_EXCHANGE_RATE: ${MATIC_TO_WCAS_EXCHANGE_RATE:-100.0}
+      GAS_PRICE_GWEI: ${GAS_PRICE_GWEI:-30.0}
+      GAS_PRICE_BUFFER_PERCENTAGE: ${GAS_PRICE_BUFFER_PERCENTAGE:-20.0}
+      TOKEN_CONVERSION_FEE_PERCENTAGE: ${TOKEN_CONVERSION_FEE_PERCENTAGE:-0.5}
+      
+      # Application Settings
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+      
+    ports:
+      - "80:80"
+      - "8000:8000"  # Direct API access (optional for debugging)
+    volumes:
+      - ./logs:/var/log
+      - bridge_data:/app/data
+    networks:
+      - bridge-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+    driver: local
+  bridge_data:
+    driver: local
+
+networks:
+  bridge-network:
+    driver: bridge 

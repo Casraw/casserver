@@ -3,6 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from backend.api import bridge_api
 from backend.api import internal_api # Added
+from backend.api import fee_routes # Added for fee calculations
 from backend.database import engine #, Base (Models are in database.models now)
 from database.models import Base # Import Base from where it's defined
 from database.models import create_db_tables
@@ -21,6 +22,7 @@ async def startup_event():
 
 app.include_router(bridge_api.router, prefix="/api", tags=["Bridge Operations"])
 app.include_router(internal_api.router, prefix="/internal", tags=["Internal Bridge Operations"]) # Added
+app.include_router(fee_routes.router, tags=["Fee Calculations"]) # Added for fee estimates
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
@@ -32,3 +34,11 @@ async def read_index():
 @app.get("/poly_to_cas")
 async def read_poly_to_cas():
     return FileResponse("frontend/poly_to_cas.html")
+
+@app.get("/fees")
+async def read_fee_calculator():
+    return FileResponse("frontend/fee_calculator.html")
+
+@app.get("/fee-options")
+async def read_fee_comparison():
+    return FileResponse("frontend/fee_comparison.html")

@@ -5,27 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Polygon to Cascoin Bridge</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
-        h2 { text-align: center; color: #2c3e50; }
-        label { display: block; margin-bottom: 8px; font-weight: bold; }
-        input[type="text"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; }
-        button { background-color: #3498db; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
-        button:hover { background-color: #2980b9; }
-        #responseArea { margin-top: 20px; padding: 10px; border: 1px solid #eee; border-radius: 4px; background-color: #e9ecef; }
-        .error { color: red; font-weight: bold; }
-        .success { color: green; }
-        .info { font-size: 0.9em; color: #555; }
-        .nav-link { text-align: center; margin-bottom: 15px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; }
+        .container { background-color: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
+        h2 { text-align: center; color: #2c3e50; margin-bottom: 30px; font-size: 2em; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #495057; }
+        input[type="text"], input[type="number"] { width: calc(100% - 22px); padding: 12px; margin-bottom: 20px; border: 2px solid #ddd; border-radius: 6px; font-size: 16px; transition: border-color 0.3s ease; }
+        input:focus { outline: none; border-color: #667eea; }
+        button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; transition: transform 0.2s ease; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        button:disabled { background: #ccc; transform: none; cursor: not-allowed; }
+        #responseArea { margin-top: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; background-color: #f8f9fa; }
+        .error { color: #dc3545; font-weight: 600; background-color: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb; }
+        .success { color: #155724; background-color: #d4edda; padding: 10px; border-radius: 4px; border: 1px solid #c3e6cb; }
+        .info { font-size: 0.9em; color: #6c757d; }
+        .nav-link { text-align: center; margin-bottom: 20px; }
+        .nav-link a { color: #667eea; text-decoration: none; margin: 0 15px; font-weight: 500; }
+        .nav-link a:hover { text-decoration: underline; }
+        
+        .fee-selection { margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef; }
+        .fee-options { display: grid; gap: 15px; margin-top: 15px; }
+        .fee-option { padding: 15px; border: 2px solid #e9ecef; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; background: white; }
+        .fee-option:hover { border-color: #667eea; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1); }
+        .fee-option.selected { border-color: #667eea; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); }
+        .fee-option input[type="radio"] { display: none; }
+        .fee-option label { cursor: pointer; margin: 0; }
+        .fee-option label strong { display: block; margin-bottom: 5px; color: #2c3e50; }
+        .fee-option label small { color: #6c757d; }
+        
+        .fee-breakdown { margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 8px; border: 1px solid #ddd; }
+        .fee-breakdown h4 { margin-top: 0; color: #2c3e50; }
+        .fee-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd; }
+        .fee-row:last-child { border-bottom: none; font-weight: bold; }
+        .fee-label { font-weight: 500; }
+        .fee-amount { font-weight: 600; color: #495057; }
+        .warning { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 4px; border: 1px solid #ffeaa7; margin: 10px 0; }
+        .loading { display: none; text-align: center; padding: 10px; }
+        .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #667eea; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>Wrapped Cascoin (wCAS) on Polygon &rarr; Cascoin (CAS)</h2>
-        <p class="nav-link"><a href="/">Switch to Cascoin &rarr; Polygon Bridge</a></p>
-
-        <div>
-            <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddressInfo">Loading...</span></p>
+        <div class="nav-link">
+            <a href="/cas_to_poly">CAS → Polygon Bridge</a>
+            <a href="/fees">Fee Calculator</a>
+            <a href="/fee-options">Compare Fee Options</a>
         </div>
 
         <form id="polyToCasForm">
@@ -37,7 +62,38 @@
                 <label for="cascoinAddress">Your Cascoin Address (to receive CAS):</label>
                 <input type="text" id="cascoinAddress" name="cascoinAddress" required placeholder="Enter your Cascoin address">
             </div>
-            <button type="submit">Get wCAS Deposit Address</button>
+            
+            <div>
+                <label for="bridgeAmount">Amount to Bridge (wCAS):</label>
+                <input type="number" id="bridgeAmount" name="bridgeAmount" min="0.01" step="0.001" placeholder="Enter amount" required>
+            </div>
+
+            <div class="fee-selection">
+                <label>Choose Fee Payment Method:</label>
+                <div class="fee-options">
+                    <div class="fee-option" onclick="selectFeeModel('direct_payment')">
+                        <input type="radio" id="directPayment" name="feeModel" value="direct_payment" checked>
+                        <label for="directPayment">
+                            <strong>💳 Pay with MATIC</strong>
+                            <small>Lower fees - Pay gas directly with MATIC tokens</small>
+                        </label>
+                    </div>
+                    <div class="fee-option" onclick="selectFeeModel('deducted')">
+                        <input type="radio" id="deductedFees" name="feeModel" value="deducted">
+                        <label for="deductedFees">
+                            <strong>📦 All-Inclusive</strong>
+                            <small>Simple - All fees deducted from bridge amount</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div id="feeBreakdown" class="fee-breakdown" style="display: none;">
+                <h4>Fee Breakdown</h4>
+                <div id="feeDetails"></div>
+            </div>
+
+            <button type="submit" id="submitButton">Get wCAS Deposit Address</button>
         </form>
 
         <div id="responseArea" style="display:none;">
@@ -47,72 +103,211 @@
     </div>
 
     <script>
+        let selectedFeeModel = 'direct_payment';
+        let currentFeeEstimate = null;
+
+        function selectFeeModel(model) {
+            selectedFeeModel = model;
+            
+            // Update UI
+            document.querySelectorAll('.fee-option').forEach(el => el.classList.remove('selected'));
+            
+            if (model === 'direct_payment') {
+                document.getElementById('directPayment').checked = true;
+                document.querySelector('#directPayment').closest('.fee-option').classList.add('selected');
+            } else {
+                document.getElementById('deductedFees').checked = true;
+                document.querySelector('#deductedFees').closest('.fee-option').classList.add('selected');
+            }
+            
+            // Recalculate fees
+            calculateFees();
+        }
+
+        async function calculateFees() {
+            const amount = document.getElementById('bridgeAmount').value;
+            
+            if (!amount || parseFloat(amount) <= 0) {
+                document.getElementById('feeBreakdown').style.display = 'none';
+                return;
+            }
+
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'loading';
+            loadingDiv.innerHTML = '<div class="spinner"></div>Calculating fees...';
+            loadingDiv.style.display = 'block';
+            
+            const feeDetails = document.getElementById('feeDetails');
+            feeDetails.innerHTML = '';
+            feeDetails.appendChild(loadingDiv);
+            document.getElementById('feeBreakdown').style.display = 'block';
+
+            try {
+                const response = await fetch(`/api/fees/quick-estimate?amount=${amount}&operation=wcas_to_cas&fee_model=${selectedFeeModel}`);
+                const data = await response.json();
+
+                loadingDiv.style.display = 'none';
+                currentFeeEstimate = data;
+
+                if (response.ok) {
+                    displayFeeBreakdown(data);
+                } else {
+                    feeDetails.innerHTML = `<div class="error">Error calculating fees: ${data.detail}</div>`;
+                }
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                console.error('Fee calculation error:', error);
+                feeDetails.innerHTML = `<div class="error">Failed to calculate fees. Please try again.</div>`;
+            }
+        }
+
+        function displayFeeBreakdown(data) {
+            const feeDetails = document.getElementById('feeDetails');
+            let html = '';
+
+            if (data.fee_model === 'direct_payment') {
+                html = `
+                    <div class="fee-row">
+                        <span class="fee-label">Bridge Amount:</span>
+                        <span class="fee-amount">${data.input_amount} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">Bridge Service Fee:</span>
+                        <span class="fee-amount">${data.bridge_fee} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">MATIC Gas Fee (you pay):</span>
+                        <span class="fee-amount">${data.matic_fee_required} MATIC</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">You Will Receive:</span>
+                        <span class="fee-amount">${data.output_amount} CAS</span>
+                    </div>
+                `;
+                
+                if (!data.is_valid) {
+                    html += `<div class="warning">⚠️ ${data.error_message}</div>`;
+                } else {
+                    html += `<div class="success">✅ Valid transaction. Make sure you have ${data.matic_fee_required} MATIC for gas fees.</div>`;
+                }
+            } else {
+                html = `
+                    <div class="fee-row">
+                        <span class="fee-label">Bridge Amount:</span>
+                        <span class="fee-amount">${data.input_amount} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">Total Fees:</span>
+                        <span class="fee-amount">${data.total_fees} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">Fee Percentage:</span>
+                        <span class="fee-amount">${data.fee_percentage}</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">You Will Receive:</span>
+                        <span class="fee-amount">${data.output_amount} CAS</span>
+                    </div>
+                `;
+                
+                if (!data.is_valid) {
+                    html += `<div class="warning">⚠️ ${data.error_message}</div>`;
+                } else {
+                    html += `<div class="success">✅ Valid transaction. All fees included in the bridge amount.</div>`;
+                }
+            }
+
+            feeDetails.innerHTML = html;
+        }
+
         document.getElementById('polyToCasForm').addEventListener('submit', async function(event) {
             event.preventDefault();
 
-            const userPolygonAddressInput = document.getElementById('userPolygonAddress');
-            const userPolygonAddress = userPolygonAddressInput.value.trim();
-            const cascoinAddressInput = document.getElementById('cascoinAddress');
-            const cascoinAddress = cascoinAddressInput.value.trim();
+            const userPolygonAddress = document.getElementById('userPolygonAddress').value.trim();
+            const cascoinAddress = document.getElementById('cascoinAddress').value.trim();
+            const bridgeAmount = document.getElementById('bridgeAmount').value;
             const responseArea = document.getElementById('responseArea');
             const responseText = document.getElementById('responseText');
+            const submitButton = document.getElementById('submitButton');
 
             responseArea.style.display = 'none';
-            responseText.innerHTML = ''; // Clear previous messages
+            responseText.innerHTML = '';
 
-            // Validate userPolygonAddress
+            // Validate addresses
             if (!userPolygonAddress) {
-                responseText.innerHTML = '<span class="error">Polygon address cannot be empty.</span>';
                 responseArea.style.display = 'block';
-                return;
-            }
-            if (!userPolygonAddress.startsWith('0x')) {
-                responseText.innerHTML = '<span class="error">Polygon address must start with "0x".</span>';
-                responseArea.style.display = 'block';
-                return;
-            }
-            if (userPolygonAddress.length !== 42) {
-                responseText.innerHTML = '<span class="error">Polygon address must be 42 characters long.</span>';
-                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter your Polygon address.</span>';
                 return;
             }
 
-            // Validate cascoinAddress
+            if (!/^0x[a-fA-F0-9]{40}$/.test(userPolygonAddress)) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter a valid Polygon address (0x...).</span>';
+                return;
+            }
+
             if (!cascoinAddress) {
-                responseText.innerHTML = '<span class="error">Cascoin address cannot be empty.</span>';
                 responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter your Cascoin address.</span>';
                 return;
             }
-            if (cascoinAddress.length < 20) { // Example: Minimum length check
-                responseText.innerHTML = '<span class="error">Cascoin address must be at least 20 characters long.</span>';
+
+            if (!bridgeAmount || parseFloat(bridgeAmount) <= 0) {
                 responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter a valid bridge amount.</span>';
                 return;
             }
+
+            // Validate fee estimate
+            if (currentFeeEstimate && !currentFeeEstimate.is_valid) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = `<span class="error">Cannot proceed: ${currentFeeEstimate.error_message}</span>`;
+                return;
+            }
+
+            submitButton.disabled = true;
+            submitButton.textContent = 'Processing...';
 
             try {
                 const response = await fetch('/api/initiate_wcas_to_cas_return', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'application/json'
                     },
-                    body: JSON.stringify({ user_polygon_address: userPolygonAddress, target_cascoin_address: cascoinAddress })
+                    body: JSON.stringify({
+                        user_polygon_address: userPolygonAddress,
+                        target_cascoin_address: cascoinAddress,
+                        bridge_amount: parseFloat(bridgeAmount),
+                        fee_model: selectedFeeModel
+                    }),
                 });
 
-                responseArea.style.display = 'block';
                 const data = await response.json();
+                responseArea.style.display = 'block';
 
                 if (response.ok) {
-                    // Ensure fetchedBridgeAddress is used here
+                    let feeInfo = '';
+                    if (selectedFeeModel === 'direct_payment' && currentFeeEstimate) {
+                        feeInfo = `
+                            <div class="warning">
+                                <strong>Important:</strong> Make sure you have <strong>${currentFeeEstimate.matic_fee_required} MATIC</strong> 
+                                in your wallet to pay for gas fees when burning wCAS tokens.
+                            </div>
+                        `;
+                    }
+                    
                     responseText.innerHTML = `
-                        <p class="success">${data.message || 'Successfully initiated transfer!'}</p>
-                        <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddress">${fetchedBridgeAddress}</span></p>
-                        <p class="info">Your registered Polygon Address: ${data.user_polygon_address}</p>
-                        <p class="info">Your target Cascoin Address: ${data.target_cascoin_address}</p>
+                        <p class="success">${data.message || 'Success!'}</p>
+                        <p><strong>Bridge wCAS Address:</strong> <span style="word-break: break-all;">${data.bridge_address}</span></p>
+                        <p class="info">Your Polygon Address: ${data.user_polygon_address}</p>
+                        <p class="info">Your Cascoin Address: ${data.target_cascoin_address}</p>
+                        <p class="info">Bridge Amount: ${bridgeAmount} wCAS</p>
+                        <p class="info">Fee Model: ${selectedFeeModel === 'direct_payment' ? 'Pay with MATIC' : 'All-Inclusive'}</p>
                         <p class="info">Intention ID: ${data.id}</p>
                         <p class="info">Status: ${data.status}</p>
-                        <p class="info">Registered At: ${new Date(data.created_at).toLocaleString()}</p>
-                        <p class="info">Please send your wCAS from your registered Polygon address to the Bridge wCAS Deposit Address above. Once confirmed, CAS will be sent to your target Cascoin address.</p>
+                        <p class="info">Created At: ${new Date(data.created_at).toLocaleString()}</p>
+                        ${feeInfo}
+                        <p class="info">Please send exactly <strong>${bridgeAmount} wCAS</strong> from your registered Polygon address to the bridge address above. Once confirmed, CAS will be sent according to your selected fee model.</p>
                     `;
                 } else {
                     responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to initiate transfer.'} (Status: ${response.status})</span>`;
@@ -121,210 +316,25 @@
                 console.error('Request error:', error);
                 responseArea.style.display = 'block';
                 responseText.innerHTML = `<span class="error">Network error or unexpected issue: ${error.message}</span>`;
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Get wCAS Deposit Address';
             }
         });
 
-        window.addEventListener('DOMContentLoaded', async () => {
-            const bridgeAddressSpan = document.getElementById('bridgeWcasAddress');
-            // Check if the element exists in the DOM, as it's dynamically added by the form submission logic.
-            // This fetch should ideally occur once and the result stored or used to update a static part of the page
-            // if the address is always visible. If it's only shown after form submission, this approach is fine.
-            // For now, let's assume we want to fetch it on page load and potentially update a placeholder
-            // that might be visible elsewhere or ensure it's ready for when the form response is shown.
-
-            // A better approach might be to have a dedicated static span for the address outside the form response area,
-            // and update that. Let's adjust the HTML to reflect this for clarity.
-            // The current design has the address shown *after* form submission.
-            // So, this DOMContentLoaded fetch will target the span *inside* the response text.
-            // This means if the form hasn't been submitted, 'bridgeWcasAddress' might not be in the DOM yet
-            // if responseText.innerHTML hasn't populated it.
-
-            // To make it always updatable, let's assume the span with id="bridgeWcasAddress"
-            // will be part of the initial HTML structure or the form submission success HTML.
-            // The current structure has it inside the success message. So, this fetch on DOMContentLoaded
-            // won't be able to update it until *after* a successful form submission adds that span to the DOM.
-
-            // Let's refine: The request is to make the address dynamic *when the page loads*.
-            // This implies the address display element should exist on page load.
-            // The current HTML shows the bridge address *only* after form submission.
-            // I will modify the HTML to have a placeholder for the bridge address visible on page load.
-
-            // First, ensure the placeholder exists outside the form's dynamic response area.
-            // The instructions say: "<p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddress">Loading...</span></p>"
-            // This should be part of the static HTML, not just in the script's innerHTML.
-
-            // Let's assume the element `bridgeWcasAddress` will be made static in the HTML structure later.
-            // For now, the JavaScript will try to update it if it exists.
-            // If the goal is to update the address in the success message, that's already handled by the form submission logic.
-            // The task implies a general display of the address.
-
-            // Correcting the approach: The span to update must be present on page load.
-            // I will modify the HTML to have this span present initially.
-            // The current placement of the span is *inside* the dynamic responseText.
-            // This script will run on DOMContentLoaded, find the span, and update it.
-            // If the span is only created *after* form submission, this script won't find it on load.
-
-            // Given the current HTML structure, the most logical place to update the address
-            // is indeed within the success message of the form.
-            // However, the request is "when the page loads".
-            // This means the target span *must* be in the initial HTML.
-
-            // Let's assume the target span will be added to the static HTML section.
-            // For now, the provided HTML has the span *inside* the dynamic string.
-            // I will write the script to fetch the address and if the span is found, update it.
-            // The HTML modification part of the task implies changing the static text to include the span.
-
-            // The provided HTML:
-            // <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> 0xYourBridgeWCASDepositAddressHereChangeMe</p>
-            // Should become:
-            // <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddress">Loading...</span></p>
-            // This change needs to be made in the static HTML section.
-            // The existing JavaScript that dynamically creates HTML for responseText should also use this ID if it recreates that line.
-
-            // The current script *replaces* the content of responseText.innerHTML.
-            // So the span must be part of that dynamic string.
-            // The DOMContentLoaded fetch will update the span if it's *already* in the static part of the page.
-
-            // Let's stick to the instruction: "Find the HTML element... change it to <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddress">Loading...</span></p>"
-            // This means I need to make this change in the *static* HTML part first.
-            // The provided diff tool doesn't allow direct modification of the static HTML outside the script.
-            // I will assume this change is made, and the script will target `bridgeWcasAddress`.
-
-            // If the span is only in the success message, this DOMContentLoaded event won't update it until after success.
-            // To fulfill "when page loads", the span needs to be in the static HTML.
-            // I'll proceed by adding the script, and the user must ensure the span with id="bridgeWcasAddress"
-            // exists in the static HTML.
-
-            // The diff will target the JavaScript part. The HTML modification for the span
-            // should be done as a separate step or assumed.
-            // The prompt implies I should modify the static HTML line. I will provide the complete HTML modification.
-
-            // The current diff tool is for one file. I will modify the script and then the static HTML part.
-            // Let's assume the static HTML is already:
-            // <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddressDisplay">Loading...</span></p>
-            // And this is *outside* the form response area, or the form response area also uses this ID.
-            // The task description's example uses `id="bridgeWcasAddress"`.
-
-            // The snippet should look for `id="bridgeWcasAddress"`.
-            // If this element is only created *after* the form submission, then this `DOMContentLoaded`
-            // script won't find it to update.
-            //
-            // Let's assume the target span is the one within the success message.
-            // The `DOMContentLoaded` part of the requirement is tricky if the element isn't there on load.
-            //
-            // A robust way:
-            // 1. Have a static span `<span id="bridgeWcasAddressHolder">Loading...</span>` in the HTML.
-            // 2. `DOMContentLoaded` updates this span.
-            // 3. The form success message can either refer to this span or also get updated.
-
-            // The simplest interpretation is that the line:
-            // `<p><strong>Bridge wCAS Deposit Address (Polygon):</strong> 0xYourBridgeWCASDepositAddressHereChangeMe</p>`
-            // which is part of the *dynamic string* in `responseText.innerHTML` should be changed.
-            // And the `DOMContentLoaded` script should fetch this.
-            // This creates a conflict: `DOMContentLoaded` runs once. If the message isn't visible, the update is lost.
-
-            // Re-reading: "Find the HTML element where the bridge address should be displayed. The current static text is: ... You'll need to make this element targetable... change it to <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddress">Loading...</span></p>."
-            // This implies a change to a *static* part of the page, not the dynamic JS string.
-            // However, the example HTML provided *doesn't* have this static line. It's only in the JS.
-            // I will proceed by adding the script and modifying the dynamic string to include the ID,
-            // and the DOMContentLoaded listener will attempt to update it (though it might not be visible).
-            // The most straightforward solution is to ensure the span is in the static HTML.
-            // I'll provide the script assuming `id="bridgeWcasAddress"` exists on page load.
-
-            // For the purpose of this tool, I will first add the script.
-            // Then, I will perform a second modification to the HTML structure if the tool allows,
-            // or describe it in the commit message.
-            // The prompt is to modify `poly_to_cas.html`. So I can do both.
-
-            // The `replace_with_git_merge_diff` tool is best for targeted changes.
-            // I'll first change the dynamic string to include the span.
-            // Then add the new script.
-            // This means the `DOMContentLoaded` might not find the element if the form response isn't shown.
-            // A cleaner solution is a separate static display for the address.
-            // Let's assume the request meant: "When the success message is displayed, the address should be fetched dynamically."
-            // No, it says "when the page loads".
-
-            // So, the span *must* be in the static HTML. I will first make that change.
-            // Then add the script.
-
-            // The provided HTML snippet is:
-            // <p><strong>Bridge wCAS Deposit Address (Polygon):</strong> 0xYourBridgeWCASDepositAddressHereChangeMe</p>
-            // This specific line is *not* in the static HTML. It's only constructed in JS after form submission.
-            // This is a contradiction in the request.
-            //
-            // I will modify the *dynamic* string to include the ID, and also add the `DOMContentLoaded` listener.
-            // The `DOMContentLoaded` listener might not find the element until after form submission, which is okay.
-            // It will attempt to update it if it exists.
-
-            // The best approach:
-            // 1. Modify the dynamic string in the JS to use `<span id="bridgeWcasAddressDynamic">Loading...</span>`.
-            // 2. Add a static line in the HTML: `<p><strong>Bridge wCAS Deposit Address (Polygon):</strong> <span id="bridgeWcasAddressStatic">Loading...</span></p>`.
-            // 3. The `DOMContentLoaded` script updates `bridgeWcasAddressStatic`.
-            // 4. The form submission success callback *also* fetches/uses the address for `bridgeWcasAddressDynamic`.
-            // This is more complex than the request seems to imply.
-
-            // Let's follow the simplest interpretation of the request:
-            // Change the dynamic string to include `<span id="bridgeWcasAddress">Loading...</span>`.
-            // Add the `DOMContentLoaded` that fetches and updates this span.
-            // This means the address will show "Loading..." initially in the success message,
-            // then be updated by the `DOMContentLoaded` if that runs after the message is shown,
-            // or it will update a non-visible element. This isn't ideal.
-
-            // What if the `DOMContentLoaded` fetched value is stored in a variable,
-            // and the success message uses that variable?
-
-            let fetchedBridgeAddress = 'Loading...'; // Store address globally
-
-            // Fetch on DOMContentLoaded and store
-            window.addEventListener('DOMContentLoaded', async () => {
-                let addressToShow = 'Error fetching address'; // Default in case of issues
-                try {
-                    const response = await fetch('/api/bridge_config_info');
-                    if (response.ok) {
-                        const configData = await response.json();
-                        if (configData.bridge_wcas_deposit_address) {
-                            addressToShow = configData.bridge_wcas_deposit_address;
-                        } else {
-                            addressToShow = 'Not available';
-                        }
-                    } else {
-                        const errorData = await response.text();
-                        console.error('Failed to fetch bridge config:', response.status, errorData);
-                    }
-                } catch (error) {
-                    console.error('Error fetching bridge config:', error);
-                }
-
-                // Update the static info span
-                const staticInfoSpan = document.getElementById('bridgeWcasAddressInfo');
-                if (staticInfoSpan) {
-                    staticInfoSpan.textContent = addressToShow;
-                }
-
-                // Update the span within the dynamic form success message, if it exists at this point
-                // (it usually won't on DOMContentLoaded, but this makes it robust)
-                const dynamicMessageSpan = document.getElementById('bridgeWcasAddress');
-                if (dynamicMessageSpan) {
-                    dynamicMessageSpan.textContent = addressToShow;
-                }
-
-                // Make the fetched address available for the form submission callback
-                // The previous implementation used a global `fetchedBridgeAddress`.
-                // We can continue that pattern or have the form submission callback also fetch if needed.
-                // For simplicity, let's ensure the dynamic message also gets updated if it appears later.
-                // The global variable `fetchedBridgeAddress` is a good way.
-                fetchedBridgeAddress = addressToShow; // Update global var
-            });
-
-            // Form submission logic now uses the fetchedBridgeAddress
-            // The dynamic string will now use a different ID for its span to avoid conflict
-            // if we also add a static span with id="bridgeWcasAddress".
-            // Let's use bridgeWcasAddressInMessage for the dynamic one.
-            // And the DOMContentLoaded will update bridgeWcasAddress (static).
-            // The request implies ONE span with id="bridgeWcasAddress".
-            // So, the DOMContentLoaded will update it, and the dynamic string will just create it.
-            // This means the "Loading..." will be briefly visible, then updated.
+        // Real-time fee calculation
+        document.getElementById('bridgeAmount').addEventListener('input', function() {
+            const amount = this.value;
+            if (amount && parseFloat(amount) > 0) {
+                clearTimeout(this.calculateTimeout);
+                this.calculateTimeout = setTimeout(calculateFees, 500);
+            } else {
+                document.getElementById('feeBreakdown').style.display = 'none';
+            }
         });
+
+        // Initialize with direct payment selected
+        selectFeeModel('direct_payment');
     </script>
 </body>
-</html>
+</html> 

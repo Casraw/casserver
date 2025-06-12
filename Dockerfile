@@ -25,14 +25,15 @@ COPY --from=builder /app/wheels /wheels
 RUN pip3 install --no-cache-dir /wheels/*
 
 # Copy the entire application code
-# This includes the backend, watchers, tests, and frontend
+# This includes the backend, watchers, tests (including fee system tests), and frontend
 COPY . .
 
 # Copy Nginx configuration, overwriting the default
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 
-# Make entrypoint script executable
+# Make scripts executable
 RUN chmod +x /app/docker-entrypoint.sh
+RUN chmod +x /app/test_fee_system_docker.sh
 
 # Set environment variables for the backend
 ENV FLASK_ENV=development
@@ -49,6 +50,16 @@ ENV CASCOIN_RPC_PASSWORD="testpass"
 ENV BRIDGE_API_URL="http://localhost:8000/internal"
 ENV POLL_INTERVAL_SECONDS="3"
 ENV CONFIRMATIONS_REQUIRED="2"
+
+# Fee system configuration for testing
+ENV DIRECT_PAYMENT_FEE_PERCENTAGE=0.1
+ENV DEDUCTED_FEE_PERCENTAGE=2.5
+ENV MINIMUM_BRIDGE_AMOUNT=1.0
+ENV MATIC_TO_CAS_EXCHANGE_RATE=100.0
+ENV MATIC_TO_WCAS_EXCHANGE_RATE=100.0
+ENV GAS_PRICE_GWEI=30.0
+ENV GAS_PRICE_BUFFER_PERCENTAGE=20.0
+ENV TOKEN_CONVERSION_FEE_PERCENTAGE=0.5
 
 # Expose port 80 for Nginx
 EXPOSE 80
