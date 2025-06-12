@@ -3,7 +3,7 @@ import json
 import requests # For making HTTP requests to backend and Cascoin RPC
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import sessionmaker, Session as DbSession # Renamed to avoid conflict
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 import logging
 import os # Added for environment variable access
@@ -227,6 +227,9 @@ def check_cascoin_transactions():
 
                     logger.info(f"CasDeposit ID {deposit_record.id} updated: amount={amount_received_cas}, status='cas_confirmed_pending_mint'")
 
+                    # Commit the status change BEFORE calling the API to prevent a race condition
+                    db.commit()
+
                     # Trigger wCAS minting via backend API
                     mint_triggered = trigger_wcas_minting(
                         deposit_id=deposit_record.id,
@@ -242,7 +245,7 @@ def check_cascoin_transactions():
                         deposit_record.status = "mint_trigger_failed"
                         logger.error(f"Failed to trigger wCAS minting for CasDeposit ID {deposit_record.id}. Status set to 'mint_trigger_failed'.")
 
-                    db.commit() # Commit changes for this UTXO (ProcessedCascoinTxs and CasDeposit update)
+                    db.commit() # Commit the final status update (mint_triggered or mint_trigger_failed)
                     logger.info(f"Successfully processed and committed UTXO {txid}-{vout_index} for CasDeposit ID {deposit_record.id}.")
 
                 except Exception as e_utxo:

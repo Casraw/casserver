@@ -23,12 +23,12 @@ app.include_router(bridge_api.router, prefix="/api", tags=["Bridge Operations"])
 app.include_router(internal_api.router, prefix="/internal", tags=["Internal Bridge Operations"]) # Added
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.get("/")
 async def read_index():
-    return FileResponse("../frontend/cas_to_poly.html")
+    return FileResponse("frontend/cas_to_poly.html")
 
 @app.get("/poly_to_cas")
 async def read_poly_to_cas():
-    return FileResponse("../frontend/poly_to_cas.html")
+    return FileResponse("frontend/poly_to_cas.html")

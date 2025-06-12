@@ -4,3 +4,6 @@ sqlalchemy
 pydantic
 pydantic-settings
 web3 >=6.0.0
+flask
+pytest
+httpx

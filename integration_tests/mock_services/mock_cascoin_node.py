@@ -17,6 +17,71 @@ SIMULATE_DOWNTIME = False
 DOWNTIME_MESSAGE = "Mock Cascoin Node: Service Unavailable (Simulated Downtime)"
 DOWNTIME_STATUS_CODE = 503
 
+# --- Generic JSON-RPC Endpoint ---
+@app.route('/', methods=['POST'])
+def json_rpc():
+    if SIMULATE_DOWNTIME:
+        print(DOWNTIME_MESSAGE)
+        return jsonify({'error': {'code': -1, 'message': DOWNTIME_MESSAGE}, 'id': None, 'result': None}), DOWNTIME_STATUS_CODE
+    
+    data = request.json
+    method = data.get('method')
+    params = data.get('params', [])
+    
+    print(f"Mock Cascoin: Received RPC call - Method: {method}, Params: {params}")
+
+    if method == 'getblockchaininfo':
+        # Return a simplified response
+        return jsonify({
+            'result': {
+                'chain': 'main',
+                'blocks': 100,
+                'headers': 100,
+                'bestblockhash': 'mock_block_hash',
+                'difficulty': 1.0,
+            }, 'error': None, 'id': data.get('id')
+        })
+    
+    if method == 'getnewaddress':
+        # Just return a mock address. The address is derived from params to be predictable for tests.
+        label = params[0] if params else "default_label"
+        mock_address = f"mock_cas_addr_for_{label}"
+        print(f"Mock Cascoin: Called getnewaddress. Returning: {mock_address}")
+        return jsonify({'result': mock_address, 'error': None, 'id': data.get('id')})
+
+    if method == 'listunspent':
+        # Mock 'listunspent' for a specific address
+        if len(params) >= 3 and isinstance(params[2], list) and len(params[2]) > 0:
+            address_to_check = params[2][0]
+            # Find a txid that maps to this address for the mock response
+            txid_for_address = None
+            for txid, info in MOCK_DEPOSITS_INFO.items():
+                if info.get('cas_recipient_address') == address_to_check:
+                    txid_for_address = txid
+                    break
+
+            if txid_for_address:
+                confirmations = MOCK_CASCOIN_DEPOSIT_TRANSACTIONS.get(txid_for_address, {}).get('confirmations', 0)
+                min_confirmations_req = params[0] if len(params) > 0 else 0
+                
+                if confirmations >= min_confirmations_req:
+                    deposit_info = MOCK_DEPOSITS_INFO[txid_for_address]
+                    return jsonify([{ # listunspent returns a list of UTXOs
+                        'txid': txid_for_address,
+                        'vout': 0, # Mock vout
+                        'address': address_to_check,
+                        'amount': float(deposit_info['amount']),
+                        'confirmations': confirmations,
+                        'spendable': True,
+                        'solvable': True,
+                    }])
+
+        # If no matching UTXO is found, return an empty list, which is the standard response
+        return jsonify([])
+
+    # Fallback for any other methods
+    return jsonify({'result': None, 'error': {'code': -32601, 'message': 'Method not found'}, 'id': data.get('id')}), 404
+
 # --- Watcher-related endpoints (Cas -> wCAS) ---
 @app.route('/get_transaction_confirmations/<txid>', methods=['GET'])
 def get_transaction_confirmations(txid):
@@ -141,4 +206,4 @@ def set_downtime():
     return jsonify({'error': 'Invalid action for downtime simulation'}), 400
 
 if __name__ == '__main__':
-    app.run(port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)

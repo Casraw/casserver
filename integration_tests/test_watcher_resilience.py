@@ -4,10 +4,10 @@ import time
 import os
 from decimal import Decimal
 
-# Assume bridge backend and mock services are running on these URLs
-BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://localhost:8000") # Your bridge's API
-MOCK_CASCOIN_NODE_URL = os.getenv("MOCK_CASCOIN_NODE_URL", "http://localhost:5001")
-MOCK_POLYGON_NODE_URL = os.getenv("MOCK_POLYGON_NODE_URL", "http://localhost:5002")
+# API endpoints for the test environment
+PUBLIC_API_URL = "http://localhost:8000"  # The API for external callers
+MOCK_CASCOIN_NODE_URL = "http://localhost:5001"
+MOCK_POLYGON_NODE_URL = "http://localhost:5002"
 
 # Configuration
 CAS_REQUIRED_CONFIRMATIONS = 6 # From previous tests
@@ -75,14 +75,25 @@ class TestWatcherResilience(unittest.TestCase):
             return response.json()
         return []
 
+    def _get_bridge_deposit_address(self, user_polygon_address):
+        """
+        Calls the bridge to get a unique CAS deposit address and create the DB record.
+        """
+        print(f"Bridge: User {user_polygon_address} requests CAS deposit address.")
+        response = requests.post(f"{PUBLIC_API_URL}/api/request_cascoin_deposit_address", json={"polygon_address": user_polygon_address})
+        response.raise_for_status()
+        return response.json()["cascoin_deposit_address"]
+
 
     # Test Case 1: Cascoin Watcher Resilience
     def test_cascoin_watcher_resilience_to_node_downtime(self):
         print("\nRunning: test_cascoin_watcher_resilience_to_node_downtime")
-        user_polygon_address = "0xPolygonUserResilience1"
+        user_polygon_address = "0x3333333333333333333333333333333333333333"
         cas_txid = "cas_tx_resilience_1"
         deposit_amount = Decimal("10.0")
-        cas_bridge_deposit_address = "bridge_cas_deposit_addr_resilience" # Known to the watcher
+        
+        # This is the crucial step to create the deposit record in the bridge's DB
+        cas_bridge_deposit_address = self._get_bridge_deposit_address(user_polygon_address)
 
         # 1. Initial CAS deposit with 0 confirmations (watcher should see it but not act yet)
         self._simulate_cas_deposit_on_mock(cas_txid, deposit_amount, 0, cas_bridge_deposit_address)
@@ -105,6 +116,10 @@ class TestWatcherResilience(unittest.TestCase):
         print("ResilienceTest: Ending Cascoin node downtime.")
         requests.post(f"{MOCK_CASCOIN_NODE_URL}/test/simulate_downtime", json={"action": "end"}).raise_for_status()
 
+        # Prime the mock for the expected mint after recovery
+        prime_data = {'address': user_polygon_address, 'amount': str(deposit_amount)}
+        requests.post(f"{MOCK_POLYGON_NODE_URL}/test/prime_mint", json=prime_data).raise_for_status()
+
         # 6. Give watcher time to recover and process the deposit
         print(f"ResilienceTest: Waiting {WATCHER_RECOVERY_TIME_SECONDS}s for Cascoin watcher to recover and process...")
         time.sleep(WATCHER_RECOVERY_TIME_SECONDS)
@@ -122,7 +137,7 @@ class TestWatcherResilience(unittest.TestCase):
     # Test Case 2: Polygon Watcher Resilience
     def test_polygon_watcher_resilience_to_node_downtime(self):
         print("\nRunning: test_polygon_watcher_resilience_to_node_downtime")
-        user_sending_wcas_address = "0xUserSendsWCASResilience"
+        user_sending_wcas_address = "0x4444444444444444444444444444444444444444"
         user_cascoin_receive_address = "casUserReceivesResilience"
         wcas_deposit_amount = Decimal("20.0")
 
@@ -192,7 +207,7 @@ class TestWatcherResilience(unittest.TestCase):
 
 if __name__ == '__main__':
     print("Starting Watcher Resilience Tests...")
-    print(f"BRIDGE_API_URL: {BRIDGE_API_URL} (Assumed, not directly used by these specific tests but by bridge system)")
+    print(f"PUBLIC_API_URL: {PUBLIC_API_URL}")
     print(f"MOCK_CASCOIN_NODE_URL: {MOCK_CASCOIN_NODE_URL}")
     print(f"MOCK_POLYGON_NODE_URL: {MOCK_POLYGON_NODE_URL}")
     print("Important: These tests require the bridge's Cascoin and Polygon watchers to be running and configured")

@@ -29,9 +29,12 @@ contract WrappedCascoin is ERC20, Ownable {
         _burn(msg.sender, amount);
     }
 
-    // OPTIONAL: If you want users to burn their tokens and have the bridge process it
-    // function burnFrom(address account, uint256 amount) public {
-    //     require(msg.sender == minter, "wCAS: caller is not the minter"); // Or some other authorized burner
-    //     _burn(account, amount);
-    // }
+    /**
+     * @dev Burns `amount` tokens from `account`, only callable by the minter.
+     * This is used by the bridge to burn tokens when they are swapped back to the native CAS token.
+     */
+    function burnFrom(address account, uint256 amount) public {
+        require(msg.sender == minter, "wCAS: caller is not the minter");
+        _burn(account, amount);
+    }
 }
