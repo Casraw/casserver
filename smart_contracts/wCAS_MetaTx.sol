@@ -4,13 +4,18 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/metatx/ERC2771Context.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
+    using ECDSA for bytes32;
+
     address public minter;
     address public relayer; // Address that can execute meta-transactions
+    mapping(address => uint256) public nonces; // Track nonces for each address
 
     event MinterChanged(address indexed oldMinter, address indexed newMinter);
     event RelayerChanged(address indexed oldRelayer, address indexed newRelayer);
+    event MetaTransferExecuted(address indexed from, address indexed to, uint256 amount, uint256 nonce);
 
     constructor(
         address initialOwner,
@@ -65,13 +70,17 @@ contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
         require(_msgSender() == relayer, "wCAS: caller is not the authorized relayer");
         
         // Verify the signature and execute the transfer
-        // Implementation would include signature verification logic
-        // For now, this is a simplified version
-        
         address from = _recoverSigner(bridgeAddress, amount, nonce, signature);
         require(balanceOf(from) >= amount, "wCAS: insufficient balance");
+        require(nonce == nonces[from], "wCAS: invalid nonce");
         
+        // Increment nonce
+        nonces[from]++;
+        
+        // Execute transfer
         _transfer(from, bridgeAddress, amount);
+        
+        emit MetaTransferExecuted(from, bridgeAddress, amount, nonce);
     }
 
     /**
@@ -89,17 +98,22 @@ contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
     }
 
     /**
-     * @dev Recover signer from signature (simplified)
+     * @dev Recover signer from signature
      */
     function _recoverSigner(
         address to,
         uint256 amount,
         uint256 nonce,
         bytes memory signature
-    ) internal pure returns (address) {
-        // This would implement proper signature recovery
-        // For production, use OpenZeppelin's ECDSA library
-        // This is a placeholder implementation
-        return address(0); // Placeholder
+    ) internal view returns (address) {
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            to,
+            amount,
+            nonce,
+            address(this)
+        ));
+        
+        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
+        return ethSignedMessageHash.recover(signature);
     }
 } 
