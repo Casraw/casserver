@@ -20,6 +20,27 @@ contract WrappedCascoin is ERC20, Ownable, ERC2771Context {
     event MetaTransferExecuted(address indexed from, address indexed to, uint256 amount, uint256 nonce);
     event ContractURIUpdated(string newURI);
 
+    // Custom access control modifiers
+    modifier onlyMinter() {
+        require(_msgSender() == minter, "wCAS: not minter");
+        _;
+    }
+
+    modifier onlyRelayer() {
+        require(_msgSender() == relayer, "wCAS: not relayer");
+        _;
+    }
+
+    modifier onlyMinterOrApproved(address account, uint256 amount) {
+        address sender = _msgSender();
+        if (sender != minter) {
+            // If not minter, check allowance like ERC20 transferFrom
+            uint256 currentAllowance = allowance(account, sender);
+            require(currentAllowance >= amount, "wCAS: exceeds allowance");
+        }
+        _;
+    }
+
     constructor(
         address initialOwner,
         address trustedForwarder
@@ -46,8 +67,7 @@ contract WrappedCascoin is ERC20, Ownable, ERC2771Context {
         }
     }
 
-    function mint(address to, uint256 amount) public {
-        require(_msgSender() == minter, "wCAS: not minter");
+    function mint(address to, uint256 amount) public onlyMinter {
         _mint(to, amount);
     }
 
@@ -61,15 +81,14 @@ contract WrappedCascoin is ERC20, Ownable, ERC2771Context {
      * This is used by the bridge to burn tokens when they are swapped back to the native CAS token.
      * For security, it follows ERC20 allowance pattern when not called by minter.
      */
-    function burnFrom(address account, uint256 amount) public {
+    function burnFrom(address account, uint256 amount) public onlyMinterOrApproved(account, amount) {
         require(account != address(0), "wCAS: zero address");
         require(amount > 0, "wCAS: zero amount");
         
-        address sender = _msgSender(); // Cache _msgSender()
+        address sender = _msgSender();
         if (sender != minter) {
-            // If not minter, check and update allowance like ERC20 transferFrom
+            // Update allowance after validation in modifier
             uint256 currentAllowance = allowance(account, sender);
-            require(currentAllowance > amount - 1, "wCAS: exceeds allowance"); // Cheaper inequality
             _approve(account, sender, currentAllowance - amount);
         }
         
@@ -85,10 +104,7 @@ contract WrappedCascoin is ERC20, Ownable, ERC2771Context {
         uint256 amount,
         uint256 nonce,
         bytes memory signature
-    ) public {
-        address sender = _msgSender(); // Cache _msgSender()
-        require(sender == relayer, "wCAS: not relayer");
-        
+    ) public onlyRelayer {
         // Inline signature recovery to save gas
         bytes32 messageHash = keccak256(abi.encodePacked(
             bridgeAddress,
@@ -99,7 +115,7 @@ contract WrappedCascoin is ERC20, Ownable, ERC2771Context {
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         address from = ECDSA.recover(ethSignedMessageHash, signature);
         
-        require(balanceOf(from) > amount - 1, "wCAS: insufficient balance"); // Cheaper inequality
+        require(balanceOf(from) >= amount, "wCAS: insufficient balance");
         require(nonce == nonces[from], "wCAS: invalid nonce");
         
         // Increment nonce
