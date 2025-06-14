@@ -21,6 +21,7 @@ contract WrappedCascoin is ERC20, Ownable2Step, ERC2771Context {
     event ContractURIUpdated(string newURI);
     event TokensBurned(address indexed account, uint256 amount);
     event ContractDeployed(address indexed owner, address indexed minter, address indexed relayer);
+    event TokensMinted(address indexed to, uint256 amount);
 
     // Custom access control modifiers - only perform checks, no state changes
     modifier onlyMinter() {
@@ -87,6 +88,7 @@ contract WrappedCascoin is ERC20, Ownable2Step, ERC2771Context {
 
     function mint(address to, uint256 amount) public onlyMinter validAddress(to) validAmount(amount) {
         _mint(to, amount);
+        emit TokensMinted(to, amount);
     }
 
     function burn(uint256 amount) public validAmount(amount) {
@@ -128,22 +130,28 @@ contract WrappedCascoin is ERC20, Ownable2Step, ERC2771Context {
         uint256 nonce,
         bytes memory signature
     ) public onlyRelayer validAddress(bridgeAddress) validAmount(amount) {
+        // Cache storage variables for gas optimization
+        address contractAddress = address(this);
+        
         // Use abi.encode instead of abi.encodePacked to prevent hash collisions
         bytes32 messageHash = keccak256(abi.encode(
             bridgeAddress,
             amount,
             nonce,
-            address(this)
+            contractAddress
         ));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         address from = ECDSA.recover(ethSignedMessageHash, signature);
         
         require(from != address(0), "wCAS: invalid signature");
         require(balanceOf(from) > amount - 1, "wCAS: insufficient balance"); // Cheaper inequality
-        require(nonce == nonces[from], "wCAS: invalid nonce");
+        
+        // Cache nonces[from] to avoid multiple SLOADs
+        uint256 currentNonce = nonces[from];
+        require(nonce == currentNonce, "wCAS: invalid nonce");
         
         // Increment nonce
-        nonces[from]++;
+        nonces[from] = currentNonce + 1;
         
         // Execute transfer
         _transfer(from, bridgeAddress, amount);
