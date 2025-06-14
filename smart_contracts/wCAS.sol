@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
+contract WrappedCascoin is ERC20, Ownable, ERC2771Context {
     using ECDSA for bytes32;
 
     address public minter;
