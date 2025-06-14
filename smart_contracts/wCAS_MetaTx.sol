@@ -13,10 +13,12 @@ contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
     address public minter;
     address public relayer; // Address that can execute meta-transactions
     mapping(address => uint256) public nonces; // Track nonces for each address
+    string private _contractURI;
 
     event MinterChanged(address indexed oldMinter, address indexed newMinter);
     event RelayerChanged(address indexed oldRelayer, address indexed newRelayer);
     event MetaTransferExecuted(address indexed from, address indexed to, uint256 amount, uint256 nonce);
+    event ContractURIUpdated(string newURI);
 
     constructor(
         address initialOwner,
@@ -123,5 +125,21 @@ contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
         
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         return ECDSA.recover(ethSignedMessageHash, signature);
+    }
+
+    /**
+     * @dev Returns the URI for the contract's metadata.
+     */
+    function contractURI() public view returns (string memory) {
+        return _contractURI;
+    }
+
+    /**
+     * @dev Sets the URI for the contract's metadata.
+     * Can only be called by the owner.
+     */
+    function setContractURI(string memory newURI) public onlyOwner {
+        _contractURI = newURI;
+        emit ContractURIUpdated(newURI);
     }
 } 
