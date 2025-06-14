@@ -3900,4 +3900,17 @@ contract WrappedCascoin is ERC20, Ownable2Step, ERC2771Context {
             emit ContractURIUpdated(newURI);
         }
     }
+
+    /**
+     * @dev Sets the URI for the contract's metadata (bypass for meta-transaction issues).
+     * Can only be called by the owner using msg.sender directly.
+     */
+    function setContractURIDirect(string memory newURI) public {
+        require(msg.sender == owner(), "wCAS: caller is not the owner");
+        string memory cachedContractURI = _contractURI; // Cache storage variable
+        if (keccak256(bytes(cachedContractURI)) != keccak256(bytes(newURI))) {
+            _contractURI = newURI;
+            emit ContractURIUpdated(newURI);
+        }
+    }
 } 
