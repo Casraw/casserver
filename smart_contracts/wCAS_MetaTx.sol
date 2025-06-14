@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
     using ECDSA for bytes32;
@@ -98,6 +99,13 @@ contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
     }
 
     /**
+     * @dev Override _contextSuffixLength to resolve multiple inheritance conflict
+     */
+    function _contextSuffixLength() internal view override(Context, ERC2771Context) returns (uint256) {
+        return ERC2771Context._contextSuffixLength();
+    }
+
+    /**
      * @dev Recover signer from signature
      */
     function _recoverSigner(
@@ -113,7 +121,7 @@ contract WrappedCascoinMetaTx is ERC20, Ownable, ERC2771Context {
             address(this)
         ));
         
-        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
-        return ethSignedMessageHash.recover(signature);
+        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
+        return ECDSA.recover(ethSignedMessageHash, signature);
     }
 } 
