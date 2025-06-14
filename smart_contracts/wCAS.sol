@@ -133,7 +133,8 @@ contract WrappedCascoin is ERC20, Ownable2Step, ERC2771Context {
         // Cache storage variables for gas optimization
         address contractAddress = address(this);
         
-        // Use abi.encode instead of abi.encodePacked to prevent hash collisions
+        // Use abi.encode instead of abi.encodePacked to prevent hash collisions in signature verification
+        // This is a security best practice for cryptographic operations
         bytes32 messageHash = keccak256(abi.encode(
             bridgeAddress,
             amount,
