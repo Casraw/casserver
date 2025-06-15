@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bridge Fee Calculator</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container { 
+            background-color: #fff; 
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
+            max-width: 600px; 
+            margin: auto;
+            backdrop-filter: blur(10px);
+        }
+        h2 { 
+            text-align: center; 
+            color: #2c3e50; 
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        .calc-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+        }
+        label { 
+            display: block; 
+            margin-bottom: 8px; 
+            font-weight: 600; 
+            color: #495057;
+        }
+        input[type="number"], select { 
+            width: calc(100% - 22px); 
+            padding: 12px; 
+            margin-bottom: 15px; 
+            border: 2px solid #ddd; 
+            border-radius: 6px; 
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+        input[type="number"]:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; 
+            padding: 12px 25px; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            font-weight: 600;
+            transition: transform 0.2s ease;
+        }
+        button:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .fee-breakdown { 
+            margin-top: 25px; 
+            padding: 20px; 
+            border: 2px solid #e9ecef; 
+            border-radius: 8px; 
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            display: none;
+        }
+        .fee-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #ddd;
+        }
+        .fee-row:last-child {
+            border-bottom: none;
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #2c3e50;
+        }
+        .fee-label { font-weight: 500; }
+        .fee-amount { font-weight: 600; color: #495057; }
+        .error { 
+            color: #dc3545; 
+            font-weight: 600; 
+            padding: 10px;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .success { 
+            color: #155724;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        .info { 
+            font-size: 0.9em; 
+            color: #6c757d; 
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e2e3e5;
+            border-radius: 4px;
+        }
+        .nav-links { 
+            text-align: center; 
+            margin-bottom: 20px; 
+        }
+        .nav-links a { 
+            color: #667eea; 
+            text-decoration: none; 
+            margin: 0 15px;
+            font-weight: 500;
+        }
+        .nav-links a:hover { 
+            text-decoration: underline; 
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🌉 Bridge Fee Calculator</h2>
+        
+        <div class="nav-links">
+            <a href="/">CAS → Polygon Bridge</a>
+            <a href="/poly_to_cas">Polygon → CAS Bridge</a>
+        </div>
+
+        <div class="calc-section">
+            <h3>Calculate Bridge Fees</h3>
+            <form id="feeCalculatorForm">
+                <div>
+                    <label for="bridgeOperation">Bridge Direction:</label>
+                    <select id="bridgeOperation" name="bridgeOperation" required>
+                        <option value="">Select bridge direction</option>
+                        <option value="cas_to_wcas">CAS → wCAS (Cascoin to Polygon)</option>
+                        <option value="wcas_to_cas">wCAS → CAS (Polygon to Cascoin)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="bridgeAmount">Amount to Bridge:</label>
+                    <input type="number" id="bridgeAmount" name="bridgeAmount" 
+                           required min="0" step="0.000001" placeholder="Enter amount">
+                </div>
+                <button type="submit">Calculate Fees</button>
+            </form>
+            
+            <div class="loading" id="loadingIndicator">
+                <div class="spinner"></div>
+                Calculating fees...
+            </div>
+        </div>
+
+        <div class="fee-breakdown" id="feeBreakdown">
+            <h3>Fee Breakdown</h3>
+            <div id="feeDetails"></div>
+            <div class="info" id="feeInfo"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('feeCalculatorForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const amount = document.getElementById('bridgeAmount').value.trim();
+            const operation = document.getElementById('bridgeOperation').value;
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const feeBreakdown = document.getElementById('feeBreakdown');
+            const feeDetails = document.getElementById('feeDetails');
+            const feeInfo = document.getElementById('feeInfo');
+            
+            // Clear previous results
+            feeBreakdown.style.display = 'none';
+            feeDetails.innerHTML = '';
+            feeInfo.innerHTML = '';
+            
+            // Validation
+            if (!amount || !operation) {
+                showError('Please fill in all fields');
+                return;
+            }
+            
+            if (parseFloat(amount) <= 0) {
+                showError('Amount must be greater than 0');
+                return;
+            }
+            
+            // Show loading
+            loadingIndicator.style.display = 'block';
+            
+            try {
+                const response = await fetch(`/api/fees/quick-estimate?amount=${encodeURIComponent(amount)}&operation=${encodeURIComponent(operation)}`);
+                const data = await response.json();
+                
+                loadingIndicator.style.display = 'none';
+                
+                if (response.ok) {
+                    displayFeeBreakdown(data);
+                } else {
+                    showError(data.detail || 'Failed to calculate fees');
+                }
+            } catch (error) {
+                loadingIndicator.style.display = 'none';
+                console.error('Fee calculation error:', error);
+                showError('Network error. Please try again.');
+            }
+        });
+        
+        function displayFeeBreakdown(data) {
+            const feeDetails = document.getElementById('feeDetails');
+            const feeInfo = document.getElementById('feeInfo');
+            const feeBreakdown = document.getElementById('feeBreakdown');
+            
+            const operationName = data.operation || (
+                document.getElementById('bridgeOperation').value === 'cas_to_wcas' 
+                ? 'CAS → wCAS' : 'wCAS → CAS'
+            );
+            
+            feeDetails.innerHTML = `
+                <div class="fee-row">
+                    <span class="fee-label">Input Amount:</span>
+                    <span class="fee-amount">${data.input_amount} ${getInputCurrency()}</span>
+                </div>
+                <div class="fee-row">
+                    <span class="fee-label">Total Fees:</span>
+                    <span class="fee-amount">${data.total_fees} ${getInputCurrency()}</span>
+                </div>
+                <div class="fee-row">
+                    <span class="fee-label">Fee Percentage:</span>
+                    <span class="fee-amount">${data.fee_percentage}</span>
+                </div>
+                <div class="fee-row">
+                    <span class="fee-label">You Will Receive:</span>
+                    <span class="fee-amount">${data.output_amount} ${getOutputCurrency()}</span>
+                </div>
+            `;
+            
+            let infoMessage = `<strong>Operation:</strong> ${operationName}<br>`;
+            
+            if (data.is_valid) {
+                infoMessage += '<span class="success">✅ This transaction is valid and can be processed.</span>';
+            } else {
+                infoMessage += `<span class="error">❌ ${data.error_message}</span>`;
+            }
+            
+            // Add explanation of fees
+            const operation = document.getElementById('bridgeOperation').value;
+            if (operation === 'cas_to_wcas') {
+                infoMessage += '<br><br><strong>Fee Explanation:</strong><br>' +
+                    '• Bridge Service Fee: Covers bridge operation and maintenance<br>' +
+                    '• Polygon Network Fee: Covers MATIC gas costs for minting wCAS';
+            } else if (operation === 'wcas_to_cas') {
+                infoMessage += '<br><br><strong>Fee Explanation:</strong><br>' +
+                    '• Bridge Service Fee: Covers bridge operation and maintenance<br>' +
+                    '• CAS Network Fee: Covers transaction fees on Cascoin network<br>' +
+                    '• Polygon Burn Fee: Covers MATIC gas costs for burning wCAS';
+            }
+            
+            feeInfo.innerHTML = infoMessage;
+            feeBreakdown.style.display = 'block';
+        }
+        
+        function getInputCurrency() {
+            const operation = document.getElementById('bridgeOperation').value;
+            return operation === 'cas_to_wcas' ? 'CAS' : 'wCAS';
+        }
+        
+        function getOutputCurrency() {
+            const operation = document.getElementById('bridgeOperation').value;
+            return operation === 'cas_to_wcas' ? 'wCAS' : 'CAS';
+        }
+        
+        function showError(message) {
+            const feeDetails = document.getElementById('feeDetails');
+            const feeBreakdown = document.getElementById('feeBreakdown');
+            
+            feeDetails.innerHTML = `<div class="error">${message}</div>`;
+            feeBreakdown.style.display = 'block';
+        }
+        
+        // Real-time calculation on input change
+        let calculationTimeout;
+        document.getElementById('bridgeAmount').addEventListener('input', function() {
+            clearTimeout(calculationTimeout);
+            calculationTimeout = setTimeout(() => {
+                const operation = document.getElementById('bridgeOperation').value;
+                if (operation && this.value && parseFloat(this.value) > 0) {
+                    document.getElementById('feeCalculatorForm').dispatchEvent(new Event('submit'));
+                }
+            }, 500); // Debounce for 500ms
+        });
+        
+        document.getElementById('bridgeOperation').addEventListener('change', function() {
+            const amount = document.getElementById('bridgeAmount').value;
+            if (amount && parseFloat(amount) > 0) {
+                document.getElementById('feeCalculatorForm').dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+</body>
+</html> 

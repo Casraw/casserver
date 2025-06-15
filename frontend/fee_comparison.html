@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bridge Fee Payment Options</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container { 
+            background-color: #fff; 
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1); 
+            max-width: 900px; 
+            margin: auto;
+        }
+        h2 { 
+            text-align: center; 
+            color: #2c3e50; 
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        .fee-models {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        .fee-model {
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 25px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            transition: all 0.3s ease;
+        }
+        .fee-model:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .fee-model.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        }
+        .fee-model h3 {
+            color: #2c3e50;
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .icon {
+            font-size: 1.5em;
+        }
+        .pros-cons {
+            margin: 15px 0;
+        }
+        .pros, .cons {
+            margin: 10px 0;
+        }
+        .pros li { color: #28a745; }
+        .cons li { color: #dc3545; }
+        .input-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        label { 
+            display: block; 
+            margin-bottom: 8px; 
+            font-weight: 600; 
+            color: #495057;
+        }
+        input, select { 
+            width: calc(100% - 22px); 
+            padding: 12px; 
+            margin-bottom: 15px; 
+            border: 2px solid #ddd; 
+            border-radius: 6px; 
+            font-size: 16px;
+        }
+        button { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; 
+            padding: 12px 25px; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            font-weight: 600;
+            margin-right: 10px;
+        }
+        button:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .comparison-table {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        .comparison-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .comparison-table th, .comparison-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .comparison-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+        }
+        .comparison-table tr:hover {
+            background-color: #f8f9fa;
+        }
+        .nav-links { 
+            text-align: center; 
+            margin-bottom: 20px; 
+        }
+        .nav-links a { 
+            color: #667eea; 
+            text-decoration: none; 
+            margin: 0 15px;
+            font-weight: 500;
+        }
+        .loading { display: none; text-align: center; padding: 20px; }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .highlight { background-color: #fff3cd; padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .error { color: #dc3545; background-color: #f8d7da; padding: 10px; border-radius: 4px; }
+        .success { color: #155724; background-color: #d4edda; padding: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>💰 Bridge Fee Payment Options</h2>
+        
+        <div class="nav-links">
+            <a href="/">CAS → Polygon Bridge</a>
+            <a href="/poly_to_cas">Polygon → CAS Bridge</a>
+            <a href="/fees">Fee Calculator</a>
+        </div>
+
+        <div class="fee-models">
+            <div class="fee-model" id="directPaymentModel" onclick="selectFeeModel('direct_payment')">
+                <h3><span class="icon">💳</span>Direct MATIC Payment</h3>
+                <p><strong>How it works:</strong> You pay MATIC fees directly from your wallet, just like any other DeFi protocol.</p>
+                <div class="pros-cons">
+                    <div class="pros">
+                        <strong>✅ Pros:</strong>
+                        <ul>
+                            <li>Lower bridge fees (no MATIC markup)</li>
+                            <li>Standard DeFi experience</li>
+                            <li>Full amount bridged (minus small service fee)</li>
+                            <li>Compatible with all wallets</li>
+                        </ul>
+                    </div>
+                    <div class="cons">
+                        <strong>❌ Cons:</strong>
+                        <ul>
+                            <li>Must hold MATIC tokens</li>
+                            <li>Need to manage gas fees separately</li>
+                            <li>Requires MATIC for every transaction</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="fee-model" id="tokenConversionModel" onclick="selectFeeModel('token_conversion')">
+                <h3><span class="icon">🔄</span>Token Conversion Payment</h3>
+                <p><strong>How it works:</strong> Pay MATIC fees using your wCAS/CAS tokens through our conversion service.</p>
+                <div class="pros-cons">
+                    <div class="pros">
+                        <strong>✅ Pros:</strong>
+                        <ul>
+                            <li>No need to hold MATIC</li>
+                            <li>Use existing tokens for fees</li>
+                            <li>Simplified user experience</li>
+                            <li>One-click transactions</li>
+                        </ul>
+                    </div>
+                    <div class="cons">
+                        <strong>❌ Cons:</strong>
+                        <ul>
+                            <li>Conversion fees (0.5%)</li>
+                            <li>Exchange rate fluctuations</li>
+                            <li>Slightly higher total cost</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-section">
+            <h3>Compare Fee Options</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div>
+                    <label for="bridgeAmount">Bridge Amount:</label>
+                    <input type="number" id="bridgeAmount" placeholder="100" min="0" step="0.001">
+                </div>
+                <div>
+                    <label for="bridgeOperation">Operation:</label>
+                    <select id="bridgeOperation">
+                        <option value="cas_to_wcas">CAS → wCAS</option>
+                        <option value="wcas_to_cas">wCAS → CAS</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="gasPriceGwei">Gas Price (Gwei):</label>
+                    <input type="number" id="gasPriceGwei" placeholder="30" min="1" step="0.1">
+                </div>
+            </div>
+            <button onclick="compareOptions()">Compare All Options</button>
+            <button onclick="getMaticOptions()">Get MATIC Fee Options</button>
+        </div>
+
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner"></div>
+            Calculating fee options...
+        </div>
+
+        <div class="comparison-table" id="comparisonResults" style="display: none;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Payment Method</th>
+                        <th>You Pay</th>
+                        <th>You Receive</th>
+                        <th>Total Cost</th>
+                        <th>Savings</th>
+                        <th>Best For</th>
+                    </tr>
+                </thead>
+                <tbody id="comparisonTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="detailedResults" style="margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        let selectedFeeModel = 'direct_payment';
+
+        function selectFeeModel(model) {
+            selectedFeeModel = model;
+            
+            // Update UI
+            document.querySelectorAll('.fee-model').forEach(el => el.classList.remove('selected'));
+            if (model === 'direct_payment') {
+                document.getElementById('directPaymentModel').classList.add('selected');
+            } else {
+                document.getElementById('tokenConversionModel').classList.add('selected');
+            }
+        }
+
+        async function compareOptions() {
+            const amount = document.getElementById('bridgeAmount').value;
+            const operation = document.getElementById('bridgeOperation').value;
+            const gasPrice = document.getElementById('gasPriceGwei').value || 30;
+            
+            if (!amount || parseFloat(amount) <= 0) {
+                showError('Please enter a valid bridge amount');
+                return;
+            }
+
+            showLoading(true);
+            
+            try {
+                // Get both fee models
+                const [directPayment, deductedFees] = await Promise.all([
+                    fetch(`/api/fees/quick-estimate?amount=${amount}&operation=${operation}&fee_model=direct_payment`),
+                    fetch(`/api/fees/quick-estimate?amount=${amount}&operation=${operation}&fee_model=deducted`)
+                ]);
+
+                const directData = await directPayment.json();
+                const deductedData = await deductedFees.json();
+
+                // Get token conversion options
+                const conversionData = await getTokenConversionOptions(gasPrice);
+
+                displayComparison(directData, deductedData, conversionData);
+                
+            } catch (error) {
+                console.error('Comparison error:', error);
+                showError('Failed to load fee comparison. Please try again.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function getTokenConversionOptions(gasPrice = 30) {
+            try {
+                const [wcasConversion, casConversion] = await Promise.all([
+                    fetch(`/api/fees/calculate-token-to-matic?token_type=wCAS&gas_estimate=100000&gas_price_gwei=${gasPrice}`),
+                    fetch(`/api/fees/calculate-token-to-matic?token_type=CAS&gas_estimate=100000&gas_price_gwei=${gasPrice}`)
+                ]);
+
+                return {
+                    wcas: await wcasConversion.json(),
+                    cas: await casConversion.json()
+                };
+            } catch (error) {
+                console.error('Token conversion error:', error);
+                return null;
+            }
+        }
+
+        async function getMaticOptions() {
+            const userAddress = prompt('Enter your Polygon address (for demo):') || '0x1234567890123456789012345678901234567890';
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`/api/fees/matic-options/${userAddress}?operation=mint_wcas`);
+                const options = await response.json();
+                
+                displayMaticOptions(options);
+            } catch (error) {
+                console.error('MATIC options error:', error);
+                showError('Failed to load MATIC fee options.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function displayComparison(directData, deductedData, conversionData) {
+            const tableBody = document.getElementById('comparisonTableBody');
+            const operation = document.getElementById('bridgeOperation').value;
+            const inputCurrency = operation === 'cas_to_wcas' ? 'CAS' : 'wCAS';
+            const outputCurrency = operation === 'cas_to_wcas' ? 'wCAS' : 'CAS';
+
+            let rows = '';
+
+            // Direct MATIC Payment
+            if (directData.user_pays_gas) {
+                rows += `
+                    <tr>
+                        <td><strong>💳 Direct MATIC</strong><br><small>Pay gas fees directly</small></td>
+                        <td>${directData.input_amount} ${inputCurrency}<br><small>+ ${directData.matic_fee_required} MATIC</small></td>
+                        <td>${directData.output_amount} ${outputCurrency}</td>
+                        <td>${directData.bridge_fee} ${inputCurrency}<br><small>+ gas in MATIC</small></td>
+                        <td style="color: #28a745;"><strong>Lowest Cost</strong></td>
+                        <td>Users with MATIC</td>
+                    </tr>
+                `;
+            }
+
+            // Deducted Fees Model
+            rows += `
+                <tr>
+                    <td><strong>📦 All-Inclusive</strong><br><small>Fees deducted from amount</small></td>
+                    <td>${deductedData.input_amount} ${inputCurrency}</td>
+                    <td>${deductedData.output_amount} ${outputCurrency}</td>
+                    <td>${deductedData.total_fees} ${inputCurrency}</td>
+                    <td>Standard</td>
+                    <td>Simple transactions</td>
+                </tr>
+            `;
+
+            // Token Conversion Options
+            if (conversionData) {
+                const wcasData = conversionData.wcas;
+                const casData = conversionData.cas;
+
+                rows += `
+                    <tr>
+                        <td><strong>🔄 wCAS Conversion</strong><br><small>Convert wCAS to MATIC</small></td>
+                        <td>${wcasData.total_tokens_needed} wCAS</td>
+                        <td>Gas for 1 transaction</td>
+                        <td>${wcasData.matic_needed} MATIC equivalent</td>
+                        <td>+${wcasData.conversion_fee_percentage}% conversion fee</td>
+                        <td>wCAS holders only</td>
+                    </tr>
+                    <tr>
+                        <td><strong>🔄 CAS Conversion</strong><br><small>Convert CAS to MATIC</small></td>
+                        <td>${casData.total_tokens_needed} CAS</td>
+                        <td>Gas for 1 transaction</td>
+                        <td>${casData.matic_needed} MATIC equivalent</td>
+                        <td>+${casData.conversion_fee_percentage}% conversion fee</td>
+                        <td>CAS holders only</td>
+                    </tr>
+                `;
+            }
+
+            tableBody.innerHTML = rows;
+            document.getElementById('comparisonResults').style.display = 'block';
+
+            // Display detailed results
+            displayDetailedResults(directData, deductedData);
+        }
+
+        function displayDetailedResults(directData, deductedData) {
+            const detailedDiv = document.getElementById('detailedResults');
+            
+            detailedDiv.innerHTML = `
+                <div class="highlight">
+                    <h3>💡 Recommendation</h3>
+                    <p><strong>For most users:</strong> Use the <strong>Direct MATIC Payment</strong> model if you have MATIC tokens, as it offers the lowest total fees.</p>
+                    <p><strong>For simplicity:</strong> Use the <strong>All-Inclusive</strong> model if you prefer not to manage separate gas fees.</p>
+                    <p><strong>For no-MATIC users:</strong> Use <strong>Token Conversion</strong> to pay fees with your existing tokens.</p>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <h4>Direct MATIC Payment</h4>
+                        <p><strong>Bridge Fee:</strong> ${directData.bridge_fee || directData.total_fees}</p>
+                        <p><strong>MATIC Required:</strong> ${directData.matic_fee_required || 'N/A'}</p>
+                        <p><strong>You Receive:</strong> ${directData.output_amount}</p>
+                    </div>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <h4>All-Inclusive Fees</h4>
+                        <p><strong>Total Fees:</strong> ${deductedData.total_fees}</p>
+                        <p><strong>Fee %:</strong> ${deductedData.fee_percentage}</p>
+                        <p><strong>You Receive:</strong> ${deductedData.output_amount}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function displayMaticOptions(options) {
+            const detailedDiv = document.getElementById('detailedResults');
+            
+            let optionsHtml = '<h3>MATIC Fee Payment Options</h3>';
+            
+            options.payment_options.forEach((option, index) => {
+                optionsHtml += `
+                    <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px;">
+                        <h4>${option.display_name}</h4>
+                        <p>${option.description}</p>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                `;
+                
+                Object.keys(option).forEach(key => {
+                    if (!['method', 'display_name', 'description'].includes(key)) {
+                        optionsHtml += `<p><strong>${key.replace(/_/g, ' ')}:</strong> ${option[key]}</p>`;
+                    }
+                });
+                
+                optionsHtml += '</div></div>';
+            });
+            
+            detailedDiv.innerHTML = optionsHtml;
+        }
+
+        function showLoading(show) {
+            document.getElementById('loadingIndicator').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const detailedDiv = document.getElementById('detailedResults');
+            detailedDiv.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Initialize with direct payment selected
+        selectFeeModel('direct_payment');
+        
+        // Auto-calculate on input change
+        document.getElementById('bridgeAmount').addEventListener('input', () => {
+            const amount = document.getElementById('bridgeAmount').value;
+            if (amount && parseFloat(amount) > 0) {
+                setTimeout(compareOptions, 500);
+            }
+        });
+    </script>
+</body>
+</html> 

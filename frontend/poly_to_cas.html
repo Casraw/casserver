@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polygon to Cascoin Bridge</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; }
+        .container { background-color: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
+        h2 { text-align: center; color: #2c3e50; margin-bottom: 30px; font-size: 2em; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #495057; }
+        input[type="text"], input[type="number"] { width: calc(100% - 22px); padding: 12px; margin-bottom: 20px; border: 2px solid #ddd; border-radius: 6px; font-size: 16px; transition: border-color 0.3s ease; }
+        input:focus { outline: none; border-color: #667eea; }
+        button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; transition: transform 0.2s ease; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        button:disabled { background: #ccc; transform: none; cursor: not-allowed; }
+        #responseArea { margin-top: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; background-color: #f8f9fa; }
+        .error { color: #dc3545; font-weight: 600; background-color: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb; }
+        .success { color: #155724; background-color: #d4edda; padding: 10px; border-radius: 4px; border: 1px solid #c3e6cb; }
+        .info { font-size: 0.9em; color: #6c757d; }
+        .nav-link { text-align: center; margin-bottom: 20px; }
+        .nav-link a { color: #667eea; text-decoration: none; margin: 0 15px; font-weight: 500; }
+        .nav-link a:hover { text-decoration: underline; }
+        
+        .fee-selection { margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef; }
+        .fee-options { display: grid; gap: 15px; margin-top: 15px; }
+        .fee-option { padding: 15px; border: 2px solid #e9ecef; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; background: white; }
+        .fee-option:hover { border-color: #667eea; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1); }
+        .fee-option.selected { border-color: #667eea; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); }
+        .fee-option input[type="radio"] { display: none; }
+        .fee-option label { cursor: pointer; margin: 0; }
+        .fee-option label strong { display: block; margin-bottom: 5px; color: #2c3e50; }
+        .fee-option label small { color: #6c757d; }
+        
+        .fee-breakdown { margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 8px; border: 1px solid #ddd; }
+        .fee-breakdown h4 { margin-top: 0; color: #2c3e50; }
+        .fee-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd; }
+        .fee-row:last-child { border-bottom: none; font-weight: bold; }
+        .fee-label { font-weight: 500; }
+        .fee-amount { font-weight: 600; color: #495057; }
+        .warning { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 4px; border: 1px solid #ffeaa7; margin: 10px 0; }
+        .loading { display: none; text-align: center; padding: 10px; }
+        .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #667eea; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Wrapped Cascoin (wCAS) on Polygon &rarr; Cascoin (CAS)</h2>
+        <div class="nav-link">
+            <a href="/cas_to_poly">CAS → Polygon Bridge</a>
+            <a href="/fees">Fee Calculator</a>
+            <a href="/fee-options">Compare Fee Options</a>
+        </div>
+
+        <form id="polyToCasForm">
+            <div>
+                <label for="userPolygonAddress">Your Polygon Address (from which you will send wCAS):</label>
+                <input type="text" id="userPolygonAddress" name="userPolygonAddress" required placeholder="0x...">
+            </div>
+            <div>
+                <label for="cascoinAddress">Your Cascoin Address (to receive CAS):</label>
+                <input type="text" id="cascoinAddress" name="cascoinAddress" required placeholder="Enter your Cascoin address">
+            </div>
+            
+            <div>
+                <label for="bridgeAmount">Amount to Bridge (wCAS):</label>
+                <input type="number" id="bridgeAmount" name="bridgeAmount" min="0.01" step="0.001" placeholder="Enter amount" required>
+            </div>
+
+            <div class="fee-selection">
+                <label>Choose Fee Payment Method:</label>
+                <div class="fee-options">
+                    <div class="fee-option" onclick="selectFeeModel('direct_payment')">
+                        <input type="radio" id="directPayment" name="feeModel" value="direct_payment" checked>
+                        <label for="directPayment">
+                            <strong>💳 Pay with MATIC</strong>
+                            <small>Lower fees - Pay gas directly with MATIC tokens</small>
+                        </label>
+                    </div>
+                    <div class="fee-option" onclick="selectFeeModel('deducted')">
+                        <input type="radio" id="deductedFees" name="feeModel" value="deducted">
+                        <label for="deductedFees">
+                            <strong>📦 All-Inclusive</strong>
+                            <small>Simple - All fees deducted from bridge amount</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div id="feeBreakdown" class="fee-breakdown" style="display: none;">
+                <h4>Fee Breakdown</h4>
+                <div id="feeDetails"></div>
+            </div>
+
+            <button type="submit" id="submitButton">Get wCAS Deposit Address</button>
+        </form>
+
+        <div id="responseArea" style="display:none;">
+            <h4>Bridge Response:</h4>
+            <p id="responseText"></p>
+        </div>
+    </div>
+
+    <script>
+        let selectedFeeModel = 'direct_payment';
+        let currentFeeEstimate = null;
+
+        function selectFeeModel(model) {
+            selectedFeeModel = model;
+            
+            // Update UI
+            document.querySelectorAll('.fee-option').forEach(el => el.classList.remove('selected'));
+            
+            if (model === 'direct_payment') {
+                document.getElementById('directPayment').checked = true;
+                document.querySelector('#directPayment').closest('.fee-option').classList.add('selected');
+            } else {
+                document.getElementById('deductedFees').checked = true;
+                document.querySelector('#deductedFees').closest('.fee-option').classList.add('selected');
+            }
+            
+            // Recalculate fees
+            calculateFees();
+        }
+
+        async function calculateFees() {
+            const amount = document.getElementById('bridgeAmount').value;
+            
+            if (!amount || parseFloat(amount) <= 0) {
+                document.getElementById('feeBreakdown').style.display = 'none';
+                return;
+            }
+
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'loading';
+            loadingDiv.innerHTML = '<div class="spinner"></div>Calculating fees...';
+            loadingDiv.style.display = 'block';
+            
+            const feeDetails = document.getElementById('feeDetails');
+            feeDetails.innerHTML = '';
+            feeDetails.appendChild(loadingDiv);
+            document.getElementById('feeBreakdown').style.display = 'block';
+
+            try {
+                const response = await fetch(`/api/fees/quick-estimate?amount=${amount}&operation=wcas_to_cas&fee_model=${selectedFeeModel}`);
+                const data = await response.json();
+
+                loadingDiv.style.display = 'none';
+                currentFeeEstimate = data;
+
+                if (response.ok) {
+                    displayFeeBreakdown(data);
+                } else {
+                    feeDetails.innerHTML = `<div class="error">Error calculating fees: ${data.detail}</div>`;
+                }
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                console.error('Fee calculation error:', error);
+                feeDetails.innerHTML = `<div class="error">Failed to calculate fees. Please try again.</div>`;
+            }
+        }
+
+        function displayFeeBreakdown(data) {
+            const feeDetails = document.getElementById('feeDetails');
+            let html = '';
+
+            if (data.fee_model === 'direct_payment') {
+                html = `
+                    <div class="fee-row">
+                        <span class="fee-label">Bridge Amount:</span>
+                        <span class="fee-amount">${data.input_amount} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">Bridge Service Fee:</span>
+                        <span class="fee-amount">${data.bridge_fee} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">MATIC Gas Fee (you pay):</span>
+                        <span class="fee-amount">${data.matic_fee_required} MATIC</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">You Will Receive:</span>
+                        <span class="fee-amount">${data.output_amount} CAS</span>
+                    </div>
+                `;
+                
+                if (!data.is_valid) {
+                    html += `<div class="warning">⚠️ ${data.error_message}</div>`;
+                } else {
+                    html += `<div class="success">✅ Valid transaction. Make sure you have ${data.matic_fee_required} MATIC for gas fees.</div>`;
+                }
+            } else {
+                html = `
+                    <div class="fee-row">
+                        <span class="fee-label">Bridge Amount:</span>
+                        <span class="fee-amount">${data.input_amount} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">Total Fees:</span>
+                        <span class="fee-amount">${data.total_fees} wCAS</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">Fee Percentage:</span>
+                        <span class="fee-amount">${data.fee_percentage}</span>
+                    </div>
+                    <div class="fee-row">
+                        <span class="fee-label">You Will Receive:</span>
+                        <span class="fee-amount">${data.output_amount} CAS</span>
+                    </div>
+                `;
+                
+                if (!data.is_valid) {
+                    html += `<div class="warning">⚠️ ${data.error_message}</div>`;
+                } else {
+                    html += `<div class="success">✅ Valid transaction. All fees included in the bridge amount.</div>`;
+                }
+            }
+
+            feeDetails.innerHTML = html;
+        }
+
+        document.getElementById('polyToCasForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const userPolygonAddress = document.getElementById('userPolygonAddress').value.trim();
+            const cascoinAddress = document.getElementById('cascoinAddress').value.trim();
+            const bridgeAmount = document.getElementById('bridgeAmount').value;
+            const responseArea = document.getElementById('responseArea');
+            const responseText = document.getElementById('responseText');
+            const submitButton = document.getElementById('submitButton');
+
+            responseArea.style.display = 'none';
+            responseText.innerHTML = '';
+
+            // Validate addresses
+            if (!userPolygonAddress) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter your Polygon address.</span>';
+                return;
+            }
+
+            if (!/^0x[a-fA-F0-9]{40}$/.test(userPolygonAddress)) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter a valid Polygon address (0x...).</span>';
+                return;
+            }
+
+            if (!cascoinAddress) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter your Cascoin address.</span>';
+                return;
+            }
+
+            if (!bridgeAmount || parseFloat(bridgeAmount) <= 0) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter a valid bridge amount.</span>';
+                return;
+            }
+
+            // Validate fee estimate
+            if (currentFeeEstimate && !currentFeeEstimate.is_valid) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = `<span class="error">Cannot proceed: ${currentFeeEstimate.error_message}</span>`;
+                return;
+            }
+
+            submitButton.disabled = true;
+            submitButton.textContent = 'Processing...';
+
+            try {
+                const response = await fetch('/api/initiate_wcas_to_cas_return', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_polygon_address: userPolygonAddress,
+                        target_cascoin_address: cascoinAddress,
+                        bridge_amount: parseFloat(bridgeAmount),
+                        fee_model: selectedFeeModel
+                    }),
+                });
+
+                const data = await response.json();
+                responseArea.style.display = 'block';
+
+                if (response.ok) {
+                    let feeInfo = '';
+                    if (selectedFeeModel === 'direct_payment' && currentFeeEstimate) {
+                        feeInfo = `
+                            <div class="warning">
+                                <strong>Important:</strong> Make sure you have <strong>${currentFeeEstimate.matic_fee_required} MATIC</strong> 
+                                in your wallet to pay for gas fees when burning wCAS tokens.
+                            </div>
+                        `;
+                    }
+                    
+                    responseText.innerHTML = `
+                        <p class="success">${data.message || 'Success!'}</p>
+                        <p><strong>Bridge wCAS Address:</strong> <span style="word-break: break-all;">${data.bridge_address}</span></p>
+                        <p class="info">Your Polygon Address: ${data.user_polygon_address}</p>
+                        <p class="info">Your Cascoin Address: ${data.target_cascoin_address}</p>
+                        <p class="info">Bridge Amount: ${bridgeAmount} wCAS</p>
+                        <p class="info">Fee Model: ${selectedFeeModel === 'direct_payment' ? 'Pay with MATIC' : 'All-Inclusive'}</p>
+                        <p class="info">Intention ID: ${data.id}</p>
+                        <p class="info">Status: ${data.status}</p>
+                        <p class="info">Created At: ${new Date(data.created_at).toLocaleString()}</p>
+                        ${feeInfo}
+                        <p class="info">Please send exactly <strong>${bridgeAmount} wCAS</strong> from your registered Polygon address to the bridge address above. Once confirmed, CAS will be sent according to your selected fee model.</p>
+                    `;
+                } else {
+                    responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to initiate transfer.'} (Status: ${response.status})</span>`;
+                }
+            } catch (error) {
+                console.error('Request error:', error);
+                responseArea.style.display = 'block';
+                responseText.innerHTML = `<span class="error">Network error or unexpected issue: ${error.message}</span>`;
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Get wCAS Deposit Address';
+            }
+        });
+
+        // Real-time fee calculation
+        document.getElementById('bridgeAmount').addEventListener('input', function() {
+            const amount = this.value;
+            if (amount && parseFloat(amount) > 0) {
+                clearTimeout(this.calculateTimeout);
+                this.calculateTimeout = setTimeout(calculateFees, 500);
+            } else {
+                document.getElementById('feeBreakdown').style.display = 'none';
+            }
+        });
+
+        // Initialize with direct payment selected
+        selectFeeModel('direct_payment');
+    </script>
+</body>
+</html> 
