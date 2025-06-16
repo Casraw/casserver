@@ -9,6 +9,14 @@ RUN apt-get update && \
         curl \
         && rm -rf /var/lib/apt/lists/*
 
+# Create nginx log directory and files with proper permissions
+RUN mkdir -p /var/log/nginx/ && \
+    touch /var/log/nginx/error.log && \
+    touch /var/log/nginx/access.log && \
+    chmod 755 /var/log/nginx/ && \
+    chmod 644 /var/log/nginx/error.log && \
+    chmod 644 /var/log/nginx/access.log
+
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
@@ -37,10 +45,16 @@ COPY supervisord.conf /etc/supervisor/supervisord.conf
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# Create non-root user for security
+# Create non-root user for security (but keep root for entrypoint)
 RUN useradd --create-home --shell /bin/bash app
-RUN chown -R app:app /app
-USER app
+
+# Ensure log directories exist and have proper permissions
+RUN mkdir -p /var/log && \
+    chown -R app:app /app && \
+    chown -R www-data:www-data /var/log/nginx/
+
+# Keep as root for entrypoint to handle permissions
+# Supervisor will manage user switching for individual services
 
 # Expose port
 EXPOSE 80

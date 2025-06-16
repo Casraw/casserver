@@ -3,6 +3,16 @@ set -e
 
 echo "Initializing production environment..."
 
+# Ensure nginx log files exist and have correct permissions
+echo "Setting up nginx log files..."
+mkdir -p /var/log/nginx/
+touch /var/log/nginx/access.log
+touch /var/log/nginx/error.log
+chown -R www-data:www-data /var/log/nginx/
+chmod 755 /var/log/nginx/
+chmod 644 /var/log/nginx/access.log
+chmod 644 /var/log/nginx/error.log
+
 # Initialize database
 echo "Initializing database..."
 python3 -m backend.init_db
