@@ -219,14 +219,35 @@ def check_polygon_events():
 
         logger.info(f"Scanning for wCAS 'Transfer' events to {checksum_bridge_address} from block {from_block} to {to_block}...")
 
-        # Filter for Transfer events where 'to' is our bridge's collection address
-        event_filter = wcas_contract.events.Transfer.create_filter(
-            from_block=from_block,
-            to_block=to_block,
-            argument_filters={'to': checksum_bridge_address}
-        )
-
-        new_events = event_filter.get_all_entries()
+        # Query Transfer events where 'to' is our bridge's collection address using get_logs
+        # This avoids the need for eth_newFilter which many RPC providers disable
+        transfer_event_signature = wcas_contract.events.Transfer.build_filter()
+        transfer_topic = transfer_event_signature.topics[0]
+        
+        # Create filter parameters for get_logs
+        filter_params = {
+            'fromBlock': hex(from_block),
+            'toBlock': hex(to_block),
+            'address': wcas_contract.address,
+            'topics': [
+                transfer_topic,  # Transfer event signature
+                None,            # from address (any)
+                Web3.to_hex(int(checksum_bridge_address, 16).to_bytes(32, byteorder='big'))  # to address (our bridge)
+            ]
+        }
+        
+        # Get logs directly from the node
+        logs = w3.eth.get_logs(filter_params)
+        
+        # Process logs into event objects
+        new_events = []
+        for log in logs:
+            try:
+                event = wcas_contract.events.Transfer().process_log(log)
+                new_events.append(event)
+            except Exception as e:
+                logger.warning(f"Could not process log {log['transactionHash'].hex()}: {e}")
+                continue
 
         if new_events:
             logger.info(f"Found {len(new_events)} new wCAS Transfer event(s) to the bridge address.")
