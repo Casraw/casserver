@@ -170,13 +170,16 @@ def check_cascoin_transactions():
                 logger.warning(f"RPC call 'listunspent' failed for address {address_str}. Skipping this address for now.")
                 continue
 
-            # The 'result' field should contain the list of UTXOs
-            # If rpc_response['error'] is not None, it should have been handled by _rpc_call and returned None.
-            # However, an empty result [] is a valid response if no UTXOs are found.
-            unspent_txs = rpc_response # In Cascoin, rpc_response *is* the result array if no error. Adjust if it's {'result': []}
+            # Check for RPC errors
+            if rpc_response.get("error") is not None:
+                logger.error(f"RPC error for listunspent on address {address_str}: {rpc_response['error']}")
+                continue
+
+            # Extract the result from the RPC response
+            unspent_txs = rpc_response.get("result", [])
 
             if not isinstance(unspent_txs, list):
-                logger.error(f"Unexpected format for listunspent result for address {address_str}. Expected list, got: {type(unspent_txs)}. Response: {unspent_txs}")
+                logger.error(f"Unexpected format for listunspent result for address {address_str}. Expected list, got: {type(unspent_txs)}. Response: {rpc_response}")
                 continue
 
             if not unspent_txs:
@@ -270,10 +273,11 @@ def main_loop():
     # Test Cascoin RPC connection on startup
     logger.info("Attempting initial connection to Cascoin node...")
     info = cascoin_rpc_call("getblockchaininfo")
-    if info and info.get('result'):
+    if info and info.get('error') is None and info.get('result'):
         logger.info(f"Successfully connected to Cascoin node. Chain: {info['result'].get('chain')}, Blocks: {info['result'].get('blocks')}")
     else:
-        logger.error("Failed to connect or get info from Cascoin node during startup. Please check RPC settings and node status. Watcher will continue trying.")
+        error_msg = info.get('error') if info else "No response"
+        logger.error(f"Failed to connect or get info from Cascoin node during startup. Error: {error_msg}. Please check RPC settings and node status. Watcher will continue trying.")
 
     while True:
         try:
