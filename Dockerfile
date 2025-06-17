@@ -34,6 +34,7 @@ COPY nginx/nginx.conf /etc/nginx/nginx.conf
 # Make scripts executable
 RUN chmod +x /app/docker-entrypoint.sh
 RUN chmod +x /app/test_fee_system_docker.sh
+RUN chmod +x /app/run_websocket_tests.py
 
 # Set environment variables for the backend
 ENV FLASK_ENV=development

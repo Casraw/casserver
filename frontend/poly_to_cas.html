@@ -336,5 +336,149 @@
         // Initialize with direct payment selected
         selectFeeModel('direct_payment');
     </script>
+    
+    <!-- Real-time Updates Script -->
+    <script src="/static/js/realtime.js"></script>
+    <script>
+        let realtimeClient = null;
+        
+        // Function to start real-time updates for a user
+        function startRealtimeUpdates(userAddress) {
+            if (realtimeClient) {
+                realtimeClient.disconnect();
+            }
+            
+            realtimeClient = window.initializeBridgeRealtime(userAddress);
+            
+            if (realtimeClient) {
+                // Add custom event handler for this page
+                realtimeClient.on('wcasReturnIntentionUpdate', (intention) => {
+                    console.log('Received wCAS return intention update:', intention);
+                    // The UI will be updated automatically by the UIUpdater
+                });
+            }
+        }
+        
+        // Watch for form submissions to start real-time updates
+        document.getElementById('polyToCasForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const userPolygonAddress = document.getElementById('userPolygonAddress').value.trim();
+            const cascoinAddress = document.getElementById('cascoinAddress').value.trim();
+            const bridgeAmount = document.getElementById('bridgeAmount').value;
+            const responseArea = document.getElementById('responseArea');
+            const responseText = document.getElementById('responseText');
+            const submitButton = document.getElementById('submitButton');
+
+            responseArea.style.display = 'none';
+            responseText.innerHTML = '';
+
+            // Validation
+            if (!userPolygonAddress) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter your Polygon address.</span>';
+                return;
+            }
+
+            if (!cascoinAddress) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter your Cascoin address.</span>';
+                return;
+            }
+
+            if (!bridgeAmount || parseFloat(bridgeAmount) <= 0) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter a valid bridge amount.</span>';
+                return;
+            }
+
+            // Basic validation for Ethereum address format
+            if (!/^0x[a-fA-F0-9]{40}$/.test(userPolygonAddress)) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = '<span class="error">Please enter a valid Polygon address (0x...).</span>';
+                return;
+            }
+
+            // Validate fee estimate
+            if (currentFeeEstimate && !currentFeeEstimate.is_valid) {
+                responseArea.style.display = 'block';
+                responseText.innerHTML = `<span class="error">Cannot proceed: ${currentFeeEstimate.error_message}</span>`;
+                return;
+            }
+
+            submitButton.disabled = true;
+            submitButton.textContent = 'Processing...';
+
+            try {
+                const response = await fetch('/api/initiate_wcas_to_cas_return', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_polygon_address: userPolygonAddress,
+                        target_cascoin_address: cascoinAddress,
+                        bridge_amount: parseFloat(bridgeAmount),
+                        fee_model: selectedFeeModel
+                    }),
+                });
+
+                const data = await response.json();
+                responseArea.style.display = 'block';
+
+                if (response.ok) {
+                    // Start real-time updates for this user
+                    startRealtimeUpdates(userPolygonAddress);
+                    
+                    let feeInfo = '';
+                    if (selectedFeeModel === 'direct_payment' && currentFeeEstimate) {
+                        feeInfo = `
+                            <div class="warning">
+                                <strong>Important:</strong> Make sure you have <strong>${currentFeeEstimate.matic_fee_required} MATIC</strong> 
+                                in your wallet to pay for gas fees when sending wCAS.
+                            </div>
+                        `;
+                    }
+                    
+                    // Initial display - real-time updates will enhance this
+                    responseText.innerHTML = `
+                        <div style="border-left: 4px solid #ffc107; padding-left: 15px; margin: 10px 0;">
+                            <h5 style="color: #ffc107; margin: 0 0 10px 0;">
+                                🔄 Bridge Status: Pending Deposit
+                            </h5>
+                            <div><strong>Return Intention ID:</strong> ${data.id}</div>
+                            <div><strong>From Polygon Address:</strong> 
+                                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${data.user_polygon_address}</code>
+                            </div>
+                            <div><strong>To Cascoin Address:</strong> 
+                                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${data.target_cascoin_address}</code>
+                            </div>
+                            <div><strong>Bridge Amount:</strong> ${data.bridge_amount} wCAS</div>
+                            <div><strong>Fee Model:</strong> ${data.fee_model === 'direct_payment' ? 'Pay with MATIC' : 'All-Inclusive'}</div>
+                            <div><strong>Bridge Contract:</strong> 
+                                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${data.bridge_address}</code>
+                            </div>
+                            <div><strong>Created:</strong> ${new Date(data.created_at).toLocaleString()}</div>
+                        </div>
+                        ${feeInfo}
+                        <div class="info" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                            💡 <strong>Next Step:</strong> Send exactly <strong>${data.bridge_amount} wCAS</strong> from your Polygon address to the bridge contract above.
+                            <br><br>
+                            ✨ <strong>Real-time updates are now active!</strong> This page will automatically update when your wCAS deposit is detected and your CAS is sent.
+                        </div>
+                    `;
+                } else {
+                    responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to initiate return process.'} (Status: ${response.status})</span>`;
+                }
+            } catch (error) {
+                console.error('Request error:', error);
+                responseArea.style.display = 'block';
+                responseText.innerHTML = `<span class="error">Network error or unexpected issue: ${error.message}</span>`;
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Get wCAS Deposit Address';
+            }
+        });
+    </script>
 </body>
 </html> 

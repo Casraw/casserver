@@ -216,9 +216,50 @@
             feeDetails.innerHTML = html;
         }
 
+        // Original form handler is moved to the real-time section below
+
+        // Real-time fee calculation
+        document.getElementById('bridgeAmount').addEventListener('input', function() {
+            const amount = this.value;
+            if (amount && parseFloat(amount) > 0) {
+                clearTimeout(this.calculateTimeout);
+                this.calculateTimeout = setTimeout(calculateFees, 500);
+            } else {
+                document.getElementById('feeBreakdown').style.display = 'none';
+            }
+        });
+
+        // Initialize with direct payment selected
+        selectFeeModel('direct_payment');
+    </script>
+    
+    <!-- Real-time Updates Script -->
+    <script src="/static/js/realtime.js"></script>
+    <script>
+        let realtimeClient = null;
+        
+        // Function to start real-time updates for a user
+        function startRealtimeUpdates(userAddress) {
+            if (realtimeClient) {
+                realtimeClient.disconnect();
+            }
+            
+            realtimeClient = window.initializeBridgeRealtime(userAddress);
+            
+            if (realtimeClient) {
+                // Add custom event handler for this page
+                realtimeClient.on('casDepositUpdate', (deposit) => {
+                    console.log('Received CAS deposit update:', deposit);
+                    // The UI will be updated automatically by the UIUpdater
+                });
+            }
+        }
+        
+        // Watch for form submissions to start real-time updates
+        const originalFormHandler = document.getElementById('casToPolyForm').onsubmit;
         document.getElementById('casToPolyForm').addEventListener('submit', async function(event) {
             event.preventDefault();
-
+            
             const polygonAddressInput = document.getElementById('polygonAddress');
             const polygonAddress = polygonAddressInput.value.trim();
             const bridgeAmount = document.getElementById('bridgeAmount').value;
@@ -275,6 +316,9 @@
                 responseArea.style.display = 'block';
 
                 if (response.ok) {
+                    // Start real-time updates for this user
+                    startRealtimeUpdates(polygonAddress);
+                    
                     let feeInfo = '';
                     if (selectedFeeModel === 'direct_payment' && currentFeeEstimate) {
                         feeInfo = `
@@ -285,17 +329,29 @@
                         `;
                     }
                     
+                    // Initial display - real-time updates will enhance this
                     responseText.innerHTML = `
-                        <p class="success">${data.message || 'Success!'}</p>
-                        <p><strong>Your Cascoin Deposit Address:</strong> <span style="word-break: break-all;">${data.cascoin_deposit_address}</span></p>
-                        <p class="info">Your Polygon Address: ${data.polygon_address}</p>
-                        <p class="info">Bridge Amount: ${bridgeAmount} CAS</p>
-                        <p class="info">Fee Model: ${selectedFeeModel === 'direct_payment' ? 'Pay with MATIC' : 'All-Inclusive'}</p>
-                        <p class="info">Deposit ID: ${data.id}</p>
-                        <p class="info">Status: ${data.status}</p>
-                        <p class="info">Created At: ${new Date(data.created_at).toLocaleString()}</p>
+                        <div style="border-left: 4px solid #ffc107; padding-left: 15px; margin: 10px 0;">
+                            <h5 style="color: #ffc107; margin: 0 0 10px 0;">
+                                🔄 Bridge Status: Pending
+                            </h5>
+                            <div><strong>Deposit ID:</strong> ${data.id || 'N/A'}</div>
+                            <div><strong>Cascoin Deposit Address:</strong> 
+                                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${data.cascoin_deposit_address}</code>
+                            </div>
+                            <div><strong>Your Polygon Address:</strong> 
+                                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${data.polygon_address}</code>
+                            </div>
+                            <div><strong>Bridge Amount:</strong> ${bridgeAmount} CAS</div>
+                            <div><strong>Fee Model:</strong> ${selectedFeeModel === 'direct_payment' ? 'Pay with MATIC' : 'All-Inclusive'}</div>
+                            <div><strong>Created:</strong> ${new Date(data.created_at).toLocaleString()}</div>
+                        </div>
                         ${feeInfo}
-                        <p class="info">Please send exactly <strong>${bridgeAmount} CAS</strong> to the deposit address above. Once confirmed, wCAS will be processed according to your selected fee model.</p>
+                        <div class="info" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                            💡 <strong>Next Step:</strong> Send exactly <strong>${bridgeAmount} CAS</strong> to the deposit address above to start the bridge process.
+                            <br><br>
+                            ✨ <strong>Real-time updates are now active!</strong> This page will automatically update when your deposit is detected and processed.
+                        </div>
                     `;
                 } else {
                     responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to get deposit address.'} (Status: ${response.status})</span>`;
@@ -309,20 +365,6 @@
                 submitButton.textContent = 'Get Cascoin Deposit Address';
             }
         });
-
-        // Real-time fee calculation
-        document.getElementById('bridgeAmount').addEventListener('input', function() {
-            const amount = this.value;
-            if (amount && parseFloat(amount) > 0) {
-                clearTimeout(this.calculateTimeout);
-                this.calculateTimeout = setTimeout(calculateFees, 500);
-            } else {
-                document.getElementById('feeBreakdown').style.display = 'none';
-            }
-        });
-
-        // Initialize with direct payment selected
-        selectFeeModel('direct_payment');
     </script>
 </body>
 </html>

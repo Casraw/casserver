@@ -50,6 +50,14 @@ def create_cas_deposit_record(db: Session, polygon_address: str) -> CasDeposit |
     db.add(db_deposit)
     db.commit()
     db.refresh(db_deposit)
+    
+    # Send initial WebSocket notification
+    try:
+        from backend.services.websocket_notifier import websocket_notifier
+        websocket_notifier.notify_cas_deposit_update(db_deposit.id, db)
+    except Exception as e:
+        print(f"Error sending initial WebSocket notification: {e}")
+        
     return db_deposit
 
 def get_cas_deposit_by_deposit_address(db: Session, deposit_address: str) -> Optional[CasDeposit]:
@@ -91,6 +99,14 @@ def update_cas_deposit_status_and_mint_hash(
         deposit.updated_at = func.now()
         db.commit()
         db.refresh(deposit)
+        
+        # Send WebSocket notification
+        try:
+            from backend.services.websocket_notifier import websocket_notifier
+            websocket_notifier.notify_cas_deposit_update(deposit_id, db)
+        except Exception as e:
+            print(f"Error sending WebSocket notification: {e}")  # Use logging in production
+        
         return deposit
     return None
 
@@ -111,6 +127,14 @@ def create_wcas_return_intention(db: Session, intention_request: schemas.WCASRet
     db.add(db_intention)
     db.commit()
     db.refresh(db_intention)
+    
+    # Send initial WebSocket notification
+    try:
+        from backend.services.websocket_notifier import websocket_notifier
+        websocket_notifier.notify_wcas_return_intention_update(db_intention.id, db)
+    except Exception as e:
+        print(f"Error sending initial WebSocket notification: {e}")
+    
     return db_intention
 
 def get_pending_wcas_return_intention_by_poly_address(db: Session, user_polygon_address: str) -> Optional[WcasToCasReturnIntention]:
@@ -135,6 +159,14 @@ def update_wcas_return_intention_status(db: Session, intention_id: int, new_stat
         intention.updated_at = func.now()
         db.commit()
         db.refresh(intention)
+        
+        # Send WebSocket notification
+        try:
+            from backend.services.websocket_notifier import websocket_notifier
+            websocket_notifier.notify_wcas_return_intention_update(intention_id, db)
+        except Exception as e:
+            print(f"Error sending WebSocket notification: {e}")  # Use logging in production
+        
         return intention
     return None
 
@@ -163,5 +195,13 @@ def update_polygon_transaction_status_and_cas_hash(
         poly_tx.updated_at = func.now()
         db.commit()
         db.refresh(poly_tx)
+        
+        # Send WebSocket notification
+        try:
+            from backend.services.websocket_notifier import websocket_notifier
+            websocket_notifier.notify_polygon_transaction_update(polygon_tx_id, db)
+        except Exception as e:
+            print(f"Error sending WebSocket notification: {e}")  # Use logging in production
+        
         return poly_tx
     return None

@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse
 from backend.api import bridge_api
 from backend.api import internal_api # Added
 from backend.api import fee_routes # Added for fee calculations
+from backend.api import websocket_api # Added for real-time updates
 from backend.database import engine #, Base (Models are in database.models now)
 from database.models import Base # Import Base from where it's defined
 from database.models import create_db_tables
@@ -23,6 +24,7 @@ async def startup_event():
 app.include_router(bridge_api.router, prefix="/api", tags=["Bridge Operations"])
 app.include_router(internal_api.router, prefix="/internal", tags=["Internal Bridge Operations"]) # Added
 app.include_router(fee_routes.router, tags=["Fee Calculations"]) # Added for fee estimates
+app.include_router(websocket_api.router, prefix="/api", tags=["Real-time Updates"]) # Added for WebSocket
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
