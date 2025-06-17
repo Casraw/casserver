@@ -2,7 +2,7 @@ import time
 import json
 import requests # For making HTTP requests to backend
 from web3 import Web3
-from web3.middleware import geth_poa_middleware # For PoA chains
+from web3.middleware import ExtraDataToPOAMiddleware # For PoA chains
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, MetaData
 from sqlalchemy.orm import sessionmaker, Session as DbSession
 from sqlalchemy.ext.declarative import declarative_base
@@ -110,7 +110,7 @@ def setup_web3_and_contract():
     w3 = Web3(Web3.HTTPProvider(POLYGON_RPC_URL, request_kwargs={'timeout': 60}))
 
     if "mumbai" in POLYGON_RPC_URL.lower() or "matic" in POLYGON_RPC_URL.lower() or "polygon" in POLYGON_RPC_URL.lower():
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         logger.info("Injected PoA middleware for Polygon.")
 
     if not w3.is_connected():
@@ -371,6 +371,13 @@ def main_loop():
         time.sleep(POLL_INTERVAL_SECONDS)
 
 if __name__ == "__main__":
+    # Ensure DB tables exist - Critical for polygon watcher to work
+    try:
+        Base.metadata.create_all(engine)
+        logger.info("Database tables created or verified to exist.")
+    except Exception as e:
+        logger.error(f"Failed to create database tables: {e}", exc_info=True)
+        raise SystemExit(1)
     # Ensure DB tables exist (usually backend's job)
     # Base.metadata.create_all(engine) # If watcher runs fully standalone with its own model defs
     main_loop()
