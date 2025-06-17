@@ -29,11 +29,16 @@ class BridgeConfigResponse(BaseModel):
 class WCASReturnIntentionRequest(BaseModel):
     user_polygon_address: str = Field(..., description="The Polygon address the user will send wCAS from.")
     target_cascoin_address: str = Field(..., description="The Cascoin address to receive CAS.")
+    bridge_amount: float = Field(..., description="Amount of wCAS to bridge.")
+    fee_model: str = Field(..., description="Fee model: 'direct_payment' or 'deducted'.")
 
 class WCASReturnIntentionResponse(BaseModel):
     id: int
     user_polygon_address: str
     target_cascoin_address: str
+    bridge_address: str
+    bridge_amount: float
+    fee_model: str
     status: str # Should be "pending_deposit" initially
     message: str = "Intention registered. Please deposit wCAS to the bridge address from your specified Polygon address."
     created_at: datetime.datetime

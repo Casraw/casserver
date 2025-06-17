@@ -65,6 +65,8 @@ class WcasToCasReturnIntention(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_polygon_address = Column(String, index=True, nullable=False) # Address sending wCAS
     target_cascoin_address = Column(String, nullable=False)    # Cascoin address to receive CAS
+    bridge_amount = Column(Float, nullable=False)  # Amount of wCAS to bridge
+    fee_model = Column(String, nullable=False)  # Fee model: 'direct_payment' or 'deducted'
     status = Column(String, default="pending_deposit", index=True) # e.g., pending_deposit, deposit_detected, processed, expired
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

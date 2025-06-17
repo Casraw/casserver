@@ -58,6 +58,14 @@ def initiate_wcas_to_cas_return(
     if not request.target_cascoin_address or len(request.target_cascoin_address) < 20: # Placeholder
         raise HTTPException(status_code=400, detail="Valid Cascoin address is required for target_cascoin_address.")
 
+    # Validate bridge amount
+    if not request.bridge_amount or request.bridge_amount <= 0:
+        raise HTTPException(status_code=400, detail="Bridge amount must be greater than 0.")
+
+    # Validate fee model
+    if request.fee_model not in ["direct_payment", "deducted"]:
+        raise HTTPException(status_code=400, detail="Fee model must be either 'direct_payment' or 'deducted'.")
+
     try:
         # Optional: Check if there's already an active intention for this polygon address to prevent spamming.
         # existing_intention = crud.get_pending_wcas_return_intention_by_poly_address(db, user_polygon_address=request.user_polygon_address)
@@ -75,6 +83,9 @@ def initiate_wcas_to_cas_return(
             id=intention_record.id,
             user_polygon_address=intention_record.user_polygon_address,
             target_cascoin_address=intention_record.target_cascoin_address,
+            bridge_address=settings.BRIDGE_WCAS_DEPOSIT_ADDRESS,
+            bridge_amount=request.bridge_amount,
+            fee_model=request.fee_model,
             status=intention_record.status,
             created_at=intention_record.created_at
             # The message field from WCASReturnIntentionResponse has a default value.
