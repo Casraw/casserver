@@ -221,8 +221,8 @@ def check_polygon_events():
 
         # Filter for Transfer events where 'to' is our bridge's collection address
         event_filter = wcas_contract.events.Transfer.create_filter(
-            fromBlock=from_block,
-            toBlock=to_block,
+            from_block=from_block,
+            to_block=to_block,
             argument_filters={'to': checksum_bridge_address}
         )
 
