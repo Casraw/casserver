@@ -44,3 +44,7 @@ async def read_fee_calculator():
 @app.get("/fee-options")
 async def read_fee_comparison():
     return FileResponse("frontend/fee_comparison.html")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "message": "Bridge API is running"}

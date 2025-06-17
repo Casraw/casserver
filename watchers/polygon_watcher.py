@@ -33,7 +33,8 @@ POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "15"))
 POLYGON_CONFIRMATIONS_REQUIRED = int(os.getenv("POLYGON_CONFIRMATIONS_REQUIRED", "12"))
 
 # URL for the backend's internal API endpoints (for triggering CAS release)
-BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://localhost:8000/internal")
+# For Docker: use bridge-app:8000, for local dev: use localhost:8000
+BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://bridge-app:8000/internal")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "bridge_internal_secret_key_change_me_!!!")
 
 # Post-process RPC URL (e.g. Infura often provides https_rpc... format)
@@ -152,7 +153,7 @@ def trigger_cas_release(polygon_tx_record_id: int, amount_wcas: float, target_ca
     }
 
     headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
-    api_endpoint = f"{BRIDGE_API_URL}/internal/initiate_cas_release"
+    api_endpoint = f"{BRIDGE_API_URL}/initiate_cas_release"
 
     try:
         response = requests.post(api_endpoint, json=release_payload, headers=headers, timeout=15)

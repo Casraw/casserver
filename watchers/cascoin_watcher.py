@@ -19,7 +19,8 @@ CASCOIN_RPC_USER = os.getenv("CASCOIN_RPC_USER", "your_cascoin_rpc_user")
 CASCOIN_RPC_PASSWORD = os.getenv("CASCOIN_RPC_PASSWORD", "your_cascoin_rpc_password") # Sensitive: Set in ENV
 
 # URL for the backend's internal API endpoints
-BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://localhost:8000/internal")
+# For Docker: use bridge-app:8000, for local dev: use localhost:8000
+BRIDGE_API_URL = os.getenv("BRIDGE_API_URL", "http://bridge-app:8000/internal")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "bridge_internal_secret_key_change_me_!!!")
 
 # Database URL - should match the backend's configuration
