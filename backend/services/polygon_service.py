@@ -120,17 +120,26 @@ class PolygonService:
 
             if self.chain_id in [137, 80001]: # Polygon Mainnet or Mumbai
                 try:
-                    fee_history = self.web3.eth.fee_history(1, 'latest', [25])
-                    base_fee_per_gas = fee_history['baseFeePerGas'][-1]
-                    max_priority_fee_per_gas = self.web3.to_wei(settings.DEFAULT_MAX_PRIORITY_FEE_PER_GAS_GWEI, 'gwei')
-                    max_fee_per_gas = base_fee_per_gas + max_priority_fee_per_gas
+                    # More robust EIP-1559 fee calculation
+                    last_block = self.web3.eth.get_block('latest')
+                    base_fee_per_gas = last_block['baseFeePerGas']
+                    
+                    # Get a suggested priority fee, or fall back to our setting
+                    try:
+                        max_priority_fee_per_gas = self.web3.eth.max_priority_fee
+                    except Exception:
+                        logger.warning("Could not fetch max_priority_fee, falling back to configured default.")
+                        max_priority_fee_per_gas = self.web3.to_wei(settings.DEFAULT_MAX_PRIORITY_FEE_PER_GAS_GWEI, 'gwei')
+
+                    # Add a buffer to the base fee to handle spikes. 1.5x is a safe starting point.
+                    max_fee_per_gas = int(base_fee_per_gas * 1.5) + max_priority_fee_per_gas
 
                     tx_params.update({
                         'maxPriorityFeePerGas': max_priority_fee_per_gas,
                         'maxFeePerGas': max_fee_per_gas,
                         'type': '0x2'
                     })
-                    logger.info(f"Using EIP-1559 tx params: maxFeePerGas={max_fee_per_gas}, maxPriorityFeePerGas={max_priority_fee_per_gas}")
+                    logger.info(f"Using EIP-1559 tx params: maxFeePerGas={self.web3.from_wei(max_fee_per_gas, 'gwei')} gwei, maxPriorityFeePerGas={self.web3.from_wei(max_priority_fee_per_gas, 'gwei')} gwei")
                 except Exception as e:
                     logger.warning(f"Could not determine EIP-1559 fees, falling back to legacy gasPrice: {e}")
                     tx_params['gasPrice'] = self.web3.eth.gas_price
