@@ -254,7 +254,7 @@ class PolygonService:
 
             try:
                 # Wait for the transaction receipt
-                receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120) # 120-second timeout
+                receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=300) # Increased to 300-second timeout
                 
                 logger.info("=== TRANSACTION RECEIPT RECEIVED ===")
                 logger.info(f"Transaction Hash: {receipt.transactionHash.hex()}")
