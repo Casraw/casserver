@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Optional
 import logging # Added for logging
@@ -29,38 +29,83 @@ def verify_api_key(x_internal_api_key: Optional[str] = Header(None, alias="X-Int
         raise HTTPException(status_code=403, detail="Forbidden: Invalid or missing internal API key.")
     return True
 
+# --- Background Task for Minting ---
+def mint_wcas_in_background(deposit_id: int, recipient_address: str, amount: float, db_session: Session):
+    """
+    This function is executed in the background to handle the wCAS minting process.
+    """
+    logger_prefix = f"[BackgroundTask] Minting for CasDeposit ID {deposit_id}: "
+    try:
+        logger.info(f"{logger_prefix}Starting background minting process.")
+        
+        # 1. Initialize PolygonService
+        try:
+            polygon_service = PolygonService()
+            logger.info(f"{logger_prefix}PolygonService initialized successfully.")
+        except Exception as service_exc:
+            logger.error(f"{logger_prefix}Failed to initialize PolygonService: {service_exc}", exc_info=True)
+            crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)
+            return
+
+        # 2. Call mint_wcas
+        mint_tx_hash = polygon_service.mint_wcas(
+            recipient_address=recipient_address,
+            amount_cas=amount
+        )
+
+        # 3. Update DB based on result
+        if mint_tx_hash:
+            # The polygon_service now waits for the receipt. 
+            # If it returns a hash, we can be reasonably sure it was at least accepted.
+            # A `None` return from the new implementation means it failed or timed out badly.
+            logger.info(f"{logger_prefix}wCAS minting transaction processed. Final TxHash: {mint_tx_hash}")
+            # We assume the service's logging provides details on success/failure.
+            # Here we just mark it as submitted. A separate process could verify finality if needed.
+            crud.update_cas_deposit_status_and_mint_hash(
+                db=db_session,
+                deposit_id=deposit_id,
+                new_status="mint_submitted", # Or check receipt status from service if it were returned
+                mint_tx_hash=mint_tx_hash,
+                received_amount=amount
+            )
+        else:
+            logger.error(f"{logger_prefix}PolygonService.mint_wcas did not return a transaction hash or failed.")
+            crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)
+
+    except Exception as e:
+        logger.error(f"{logger_prefix}An unexpected error occurred in the background task: {e}", exc_info=True)
+        crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)
+    finally:
+        db_session.close()
+
+
 # --- Endpoint to initiate wCAS Minting ---
-@router.post("/initiate_wcas_mint", response_model=schemas.WCASMintResponse)
+@router.post("/initiate_wcas_mint", response_model=schemas.WCASMintResponse, status_code=202)
 async def initiate_wcas_mint(
     request: schemas.WCASMintRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     api_key_verified: bool = Depends(verify_api_key) # API Key dependency
 ):
     """
     Internal endpoint called by the Cascoin watcher to initiate wCAS minting on Polygon
     after a Cascoin deposit has been confirmed.
+    This endpoint now accepts the request and queues the minting process to run in the background.
     """
     logger_prefix = f"Minting for CasDeposit ID {request.cas_deposit_id}: "
-    logger.info(f"{logger_prefix}Received request: {request.model_dump_json(indent=2)}")
+    logger.info(f"{logger_prefix}Received request, preparing for background processing: {request.model_dump_json(indent=2)}")
 
     deposit = crud.get_cas_deposit_by_id(db, deposit_id=request.cas_deposit_id)
 
     if not deposit:
-        # Attempt to update status if possible, though record doesn't exist. This won't do anything.
-        # crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", None, None)
         logger.error(f"{logger_prefix}CasDeposit record not found.")
         raise HTTPException(status_code=404, detail=f"{logger_prefix}CasDeposit record not found.")
 
-    # Validations
-    # Valid statuses for initiating a mint:
-    # "cas_confirmed_pending_mint" - fresh from watcher
-    # "mint_trigger_failed" - watcher failed to call this API previously
-    # "mint_failed" - PolygonService failed previously, retrying
     valid_initial_statuses = ["cas_confirmed_pending_mint", "mint_trigger_failed", "mint_failed"]
     if deposit.status not in valid_initial_statuses:
-        # If mint_tx_hash is present, it means it was at least submitted.
         if deposit.mint_tx_hash and deposit.status in ["mint_submitted", "mint_confirmed_on_poly"]:
              logger.info(f"{logger_prefix}Minting already processed or in progress. Status: {deposit.status}, TxHash: {deposit.mint_tx_hash}")
+             # Returning a 202 here might be confusing. A 200 OK might be better if skipping.
              return schemas.WCASMintResponse(
                 status="skipped",
                 message=f"Minting already processed or in progress. Status: {deposit.status}",
@@ -80,59 +125,29 @@ async def initiate_wcas_mint(
         crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
         raise HTTPException(status_code=400, detail=f"{logger_prefix}Invalid mint amount. Must be positive.")
 
-    # Compare float amounts with a tolerance, or ensure they are handled consistently (e.g. as strings or Decimals)
-    # For this example, direct comparison, assuming watcher sends exactly deposit.received_amount
-    if abs(request.amount_to_mint - deposit.received_amount) > 1e-9: # Tolerance for float comparison
+    if abs(request.amount_to_mint - deposit.received_amount) > 1e-9:
         logger.error(f"{logger_prefix}Mismatched mint amount. Requested: {request.amount_to_mint}, Expected from DB: {deposit.received_amount}")
         crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
         raise HTTPException(status_code=400, detail=f"{logger_prefix}Mismatched mint amount.")
 
-    # Initialize PolygonService
-    try:
-        polygon_service = PolygonService()
-        logger.info(f"{logger_prefix}PolygonService initialized successfully.")
-    except Exception as e:
-        logger.error(f"{logger_prefix}Failed to initialize PolygonService: {e}", exc_info=True)
-        # Not updating deposit status here as this is a configuration/service init issue.
-        raise HTTPException(status_code=500, detail=f"{logger_prefix}Failed to initialize PolygonService: {str(e)}")
+    # Add the long-running task to the background
+    background_tasks.add_task(
+        mint_wcas_in_background,
+        deposit_id=deposit.id,
+        recipient_address=deposit.polygon_address,
+        amount=deposit.received_amount,
+        db_session=db
+    )
+    
+    logger.info(f"{logger_prefix}Minting process has been queued to run in the background.")
 
-    # Call PolygonService to mint wCAS
-    try:
-        logger.info(f"{logger_prefix}Calling PolygonService.mint_wcas for recipient {deposit.polygon_address} with amount {deposit.received_amount}")
-        mint_tx_hash = polygon_service.mint_wcas(
-            recipient_address=deposit.polygon_address,
-            amount_cas=deposit.received_amount
-        )
-
-        if mint_tx_hash:
-            logger.info(f"{logger_prefix}wCAS minting transaction submitted to Polygon. TxHash: {mint_tx_hash}")
-            crud.update_cas_deposit_status_and_mint_hash(
-                db=db,
-                deposit_id=request.cas_deposit_id,
-                new_status="mint_submitted",
-                mint_tx_hash=mint_tx_hash,
-                received_amount=deposit.received_amount
-            )
-            return schemas.WCASMintResponse(
-                status="success",
-                message="wCAS minting transaction submitted to Polygon.",
-                polygon_mint_tx_hash=mint_tx_hash,
-                cas_deposit_id=request.cas_deposit_id
-            )
-        else:
-            logger.error(f"{logger_prefix}PolygonService.mint_wcas did not return a transaction hash.")
-            crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
-            return schemas.WCASMintResponse( # Return a 200 OK with error status, or raise HTTPException
-                status="error",
-                message="Failed to submit wCAS minting transaction. PolygonService did not return a hash.",
-                polygon_mint_tx_hash=None,
-                cas_deposit_id=request.cas_deposit_id
-            )
-
-    except Exception as e:
-        logger.error(f"{logger_prefix}Unexpected error during wCAS minting: {e}", exc_info=True)
-        crud.update_cas_deposit_status_and_mint_hash(db, request.cas_deposit_id, "mint_failed", received_amount=deposit.received_amount)
-        raise HTTPException(status_code=500, detail=f"{logger_prefix}An unexpected error occurred: {str(e)}")
+    # Immediately return an "accepted" response
+    return schemas.WCASMintResponse(
+        status="accepted",
+        message="wCAS minting process has been accepted and is running in the background.",
+        polygon_mint_tx_hash=None, # Hash is not known yet
+        cas_deposit_id=request.cas_deposit_id
+    )
 
 
 # --- Endpoint to initiate CAS Release (from wCAS on Polygon) ---
