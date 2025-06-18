@@ -241,8 +241,31 @@ class PolygonService:
             
             # Note: Transaction is now pending on the blockchain
             # It will be confirmed in the next few blocks
-            logger.info(f"Transaction is now pending on Polygon blockchain")
-            
+            logger.info(f"Transaction is now pending on Polygon blockchain. Waiting for receipt...")
+
+            try:
+                # Wait for the transaction receipt
+                receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120) # 120-second timeout
+                
+                logger.info("=== TRANSACTION RECEIPT RECEIVED ===")
+                logger.info(f"Transaction Hash: {receipt.transactionHash.hex()}")
+                logger.info(f"Block Number: {receipt.blockNumber}")
+                logger.info(f"Gas Used: {receipt.gasUsed}")
+                
+                if receipt.status == 1:
+                    logger.info("Transaction was successful (Status 1).")
+                else:
+                    logger.error("Transaction failed on-chain (Status 0).")
+                    logger.error(f"Receipt details: {receipt}")
+                    # Potentially raise an exception here or handle the failure
+                    return None # Or return the hash but log a critical error
+
+            except Exception as wait_error: # Catches TimeExhausted, etc.
+                logger.error(f"Error or timeout waiting for transaction receipt for hash {final_tx_hash}: {wait_error}", exc_info=True)
+                logger.error("The transaction may still be pending or may have failed.")
+                # Depending on desired behavior, you might still return the hash or None
+                return final_tx_hash # Return hash so it can be tracked manually
+
             return final_tx_hash
 
         except Exception as e:
