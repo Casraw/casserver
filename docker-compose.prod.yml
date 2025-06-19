@@ -10,6 +10,8 @@ services:
       POSTGRES_DB: cascoin_bridge
       POSTGRES_USER: bridge_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Also create the default postgres superuser to avoid authentication issues
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=peer"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro

@@ -10,6 +10,16 @@ SET timezone = 'UTC';
 -- Create extensions if needed
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Ensure the postgres superuser exists (for compatibility)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'postgres') THEN
+        CREATE ROLE postgres SUPERUSER CREATEDB CREATEROLE LOGIN;
+        ALTER ROLE postgres PASSWORD '${POSTGRES_PASSWORD}';
+    END IF;
+END
+$$;
+
 -- Grant necessary permissions to bridge_user
 -- (The user is already created by the PostgreSQL container with POSTGRES_USER)
 
