@@ -91,15 +91,23 @@ class PolygonService:
             logger.info(f"Contract address: {self.wcas_contract.address}")
             logger.info(f"RPC URL: {settings.POLYGON_RPC_URL}")
             
-            # Check if minter has permission
+            # Check if minter has permission - CRITICAL CHECK
             try:
                 contract_minter = self.wcas_contract.functions.minter().call()
                 logger.info(f"Contract minter address: {contract_minter}")
+                logger.info(f"Our minter address: {self.minter_address}")
+                
                 if contract_minter.lower() != self.minter_address.lower():
-                    logger.error(f"PERMISSION DENIED: Minter address mismatch! Contract expects: {contract_minter}, We have: {self.minter_address}")
+                    logger.error(f"CRITICAL ERROR - MINTER ADDRESS MISMATCH!")
+                    logger.error(f"Contract expects minter: {contract_minter}")
+                    logger.error(f"We are using minter: {self.minter_address}")
+                    logger.error(f"This will cause the mint transaction to fail with 'wCAS: not minter' error.")
+                    logger.error(f"Solution: Either update the contract's minter address to {self.minter_address}")
+                    logger.error(f"Or update MINTER_PRIVATE_KEY to use the private key of {contract_minter}")
                     return None
             except Exception as perm_check_error:
-                logger.warning(f"Could not verify minter permission: {perm_check_error}")
+                logger.error(f"Could not verify minter permission (this will likely cause mint to fail): {perm_check_error}")
+                # Don't return None here - let the transaction proceed and fail with more info
                 
             # Check connection
             if not self.web3.is_connected():
@@ -264,10 +272,27 @@ class PolygonService:
                 if receipt.status == 1:
                     logger.info("Transaction was successful (Status 1).")
                 else:
-                    logger.error("Transaction failed on-chain (Status 0).")
-                    logger.error(f"Receipt details: {receipt}")
-                    # Potentially raise an exception here or handle the failure
-                    return None # Or return the hash but log a critical error
+                    logger.error("=== TRANSACTION FAILED ON-CHAIN ===")
+                    logger.error(f"Transaction Hash: {receipt.transactionHash.hex()}")
+                    logger.error(f"Block Number: {receipt.blockNumber}")
+                    logger.error(f"Gas Used: {receipt.gasUsed} (out of {tx_params.get('gas')})")
+                    logger.error(f"From Address: {receipt['from']}")
+                    logger.error(f"To Address (Contract): {receipt.to}")
+                    logger.error(f"Transaction failed with Status 0 - this means the transaction was reverted")
+                    logger.error(f"Most likely cause: Minter address {self.minter_address} is not authorized to mint")
+                    logger.error(f"Check that the contract's minter() function returns: {self.minter_address}")
+                    logger.error(f"Full receipt details: {receipt}")
+                    
+                    # For debugging purposes, try to call the contract's minter function again
+                    try:
+                        current_minter = self.wcas_contract.functions.minter().call()
+                        logger.error(f"Current contract minter is: {current_minter}")
+                        if current_minter.lower() != self.minter_address.lower():
+                            logger.error(f"CONFIRMED: Minter mismatch. Contract minter: {current_minter}, Our minter: {self.minter_address}")
+                    except Exception as debug_error:
+                        logger.error(f"Could not check current minter: {debug_error}")
+                    
+                    return None
 
             except Exception as wait_error: # Catches TimeExhausted, etc.
                 logger.error(f"Error or timeout waiting for transaction receipt for hash {final_tx_hash}: {wait_error}", exc_info=True)

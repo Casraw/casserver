@@ -1,1 +1,10 @@
 .deps
+__pycache__
+.env
+.venv
+.DS_Store
+.idea
+.vscode
+.pytest_cache
+.ruff_cache
+.ruff_cache
