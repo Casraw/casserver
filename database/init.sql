@@ -10,15 +10,10 @@ SET timezone = 'UTC';
 -- Create extensions if needed
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Create postgres superuser if it doesn't exist
--- This is needed because we set POSTGRES_USER to bridge_user
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'postgres') THEN
-        CREATE ROLE postgres SUPERUSER CREATEDB CREATEROLE LOGIN;
-    END IF;
-END
-$$;
+-- The 'bridge_user' is created automatically by the postgres container
+-- via the POSTGRES_USER environment variable.
+-- No need to create the 'postgres' user if the application is configured
+-- to use 'bridge_user'.
 
 -- Grant necessary permissions to bridge_user
 -- (The user is already created by the PostgreSQL container with POSTGRES_USER)
