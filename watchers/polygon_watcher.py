@@ -59,6 +59,9 @@ class PolygonTransaction(Base):
     status = Column(String, default="pending_confirmation", index=True) # e.g., pending_confirmation, confirmed_wcas, processing_cas_release, cas_released, failed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Added fields for confirmation tracking
+    current_confirmations = Column(Integer, default=0)
+    required_confirmations = Column(Integer, default=12)
     cas_release_tx_hash = Column(String, nullable=True)
 
     def __repr__(self):
@@ -308,7 +311,9 @@ def check_polygon_events():
                     to_address=Web3.to_checksum_address(event.args['to']), # Also checksum bridge address
                     amount=amount_float,
                     polygon_tx_hash=tx_hash,
-                    status=poly_tx_status
+                    status=poly_tx_status,
+                    current_confirmations=0,
+                    required_confirmations=POLYGON_CONFIRMATIONS_REQUIRED
                 )
                 db.add(new_poly_tx)
                 db.commit() # Commit both new_poly_tx and updated intention (if any)
@@ -332,12 +337,26 @@ def check_polygon_events():
                     if tx_receipt:
                         tx_block_number = tx_receipt.blockNumber
                         confirmations = current_polygon_block - tx_block_number
-                        logger.info(f"Tx {tx_record.polygon_tx_hash}: Block {tx_block_number}, Current Block {current_polygon_block}, Confirmations: {confirmations}")
+                        
+                        # Update confirmation tracking fields
+                        old_confirmations = tx_record.current_confirmations
+                        tx_record.current_confirmations = confirmations
+                        tx_record.required_confirmations = POLYGON_CONFIRMATIONS_REQUIRED
+                        tx_record.updated_at = func.now()
+                        
+                        logger.info(f"Tx {tx_record.polygon_tx_hash}: Block {tx_block_number}, Current Block {current_polygon_block}, Confirmations: {confirmations}/{POLYGON_CONFIRMATIONS_REQUIRED} (was {old_confirmations})")
+
+                        # Send websocket update for confirmation progress
+                        try:
+                            headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+                            notify_payload = {"polygon_transaction_id": tx_record.id}
+                            requests.post(f"{BRIDGE_API_URL}/notify_polygon_transaction_update", json=notify_payload, headers=headers, timeout=5)
+                        except Exception as e:
+                            logger.warning(f"Failed to send websocket notification for polygon tx {tx_record.id}: {e}")
 
                         if confirmations >= POLYGON_CONFIRMATIONS_REQUIRED:
                             logger.info(f"Tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}) has {confirmations} confirmations. Sufficiently confirmed.")
                             tx_record.status = "wcas_confirmed"
-                            tx_record.updated_at = func.now()
                             # db.commit() # Commit will be done after triggering release attempt
 
                             if tx_record.user_cascoin_address_request == "UNKNOWN_NO_INTENTION":
@@ -349,9 +368,8 @@ def check_polygon_events():
                             else:
                                 tx_record.status = "cas_release_trigger_failed"
                                 logger.error(f"Failed to trigger CAS release for PolygonTransaction ID {tx_record.id}.")
-                            db.commit() # Commit status changes for tx_record
-                        else:
-                            logger.info(f"Tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}) has {confirmations}/{POLYGON_CONFIRMATIONS_REQUIRED} confirmations. Waiting.")
+                        
+                        db.commit() # Commit status changes and confirmation updates for tx_record
                     else:
                         logger.warning(f"Could not get receipt for tx {tx_record.polygon_tx_hash} (ID: {tx_record.id}). It might not be mined yet or is invalid.")
                 except Exception as e:

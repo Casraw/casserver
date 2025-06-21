@@ -229,6 +229,27 @@ class BridgeUIUpdater {
             </div>`;
         }
         
+        // Add confirmation progress if transaction is being confirmed
+        if (deposit.current_confirmations !== undefined && deposit.required_confirmations !== undefined) {
+            const confirmationsPercent = Math.min((deposit.current_confirmations / deposit.required_confirmations) * 100, 100);
+            html += `
+                <div><strong>Confirmations:</strong> 
+                    <span style="font-weight: bold; color: ${deposit.current_confirmations >= deposit.required_confirmations ? '#28a745' : '#ffc107'};">
+                        ${deposit.current_confirmations}/${deposit.required_confirmations}
+                    </span>
+                    <div style="background: #e9ecef; border-radius: 10px; overflow: hidden; height: 8px; margin: 5px 0;">
+                        <div style="background: linear-gradient(90deg, #ffc107 0%, #28a745 100%); height: 100%; width: ${confirmationsPercent}%; transition: width 0.5s ease;"></div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        if (deposit.deposit_tx_hash) {
+            html += `<div><strong>Deposit Transaction:</strong> 
+                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${deposit.deposit_tx_hash}</code>
+            </div>`;
+        }
+        
         html += `
                 <div><strong>Created:</strong> ${new Date(deposit.created_at).toLocaleString()}</div>
                 <div><strong>Last Updated:</strong> ${new Date(deposit.updated_at).toLocaleString()}</div>
@@ -283,6 +304,24 @@ class BridgeUIUpdater {
                 </div>
                 <div><strong>Bridge Amount:</strong> ${intention.bridge_amount} wCAS</div>
                 <div><strong>Fee Model:</strong> ${intention.fee_model}</div>
+        `;
+        
+        // Add confirmation progress if transaction is being confirmed
+        if (intention.current_confirmations !== undefined && intention.required_confirmations !== undefined) {
+            const confirmationsPercent = Math.min((intention.current_confirmations / intention.required_confirmations) * 100, 100);
+            html += `
+                <div><strong>Confirmations:</strong> 
+                    <span style="font-weight: bold; color: ${intention.current_confirmations >= intention.required_confirmations ? '#28a745' : '#ffc107'};">
+                        ${intention.current_confirmations}/${intention.required_confirmations}
+                    </span>
+                    <div style="background: #e9ecef; border-radius: 10px; overflow: hidden; height: 8px; margin: 5px 0;">
+                        <div style="background: linear-gradient(90deg, #ffc107 0%, #28a745 100%); height: 100%; width: ${confirmationsPercent}%; transition: width 0.5s ease;"></div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += `
                 <div><strong>Created:</strong> ${new Date(intention.created_at).toLocaleString()}</div>
                 <div><strong>Last Updated:</strong> ${new Date(intention.updated_at).toLocaleString()}</div>
             </div>
@@ -305,6 +344,79 @@ class BridgeUIUpdater {
             html += `
                 <div class="success">
                     ✅ <strong>Complete!</strong> Your CAS has been sent to your Cascoin address.
+                </div>
+            `;
+        }
+        
+        responseText.innerHTML = html;
+        responseArea.style.display = 'block';
+    }
+    
+    updatePolygonTransactionStatus(polygonTx) {
+        const responseArea = document.getElementById('responseArea');
+        const responseText = document.getElementById('responseText');
+        
+        if (!responseArea || !responseText) return;
+        
+        const statusColor = this.statusColors[polygonTx.status] || '#6c757d';
+        const statusLabel = this.statusLabels[polygonTx.status] || polygonTx.status;
+        
+        let html = `
+            <div style="border-left: 4px solid ${statusColor}; padding-left: 15px; margin: 10px 0;">
+                <h5 style="color: ${statusColor}; margin: 0 0 10px 0;">
+                    🔄 Polygon Transaction Status: ${statusLabel}
+                </h5>
+                <div><strong>Transaction ID:</strong> ${polygonTx.id}</div>
+                <div><strong>From Address:</strong> 
+                    <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${polygonTx.from_address}</code>
+                </div>
+                <div><strong>Target CAS Address:</strong> 
+                    <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${polygonTx.user_cascoin_address_request}</code>
+                </div>
+                <div><strong>Amount:</strong> ${polygonTx.amount} wCAS</div>
+                <div><strong>Polygon TX Hash:</strong> 
+                    <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${polygonTx.polygon_tx_hash}</code>
+                </div>
+        `;
+        
+        // Add confirmation progress if transaction is being confirmed
+        if (polygonTx.current_confirmations !== undefined && polygonTx.required_confirmations !== undefined) {
+            const confirmationsPercent = Math.min((polygonTx.current_confirmations / polygonTx.required_confirmations) * 100, 100);
+            html += `
+                <div><strong>Confirmations:</strong> 
+                    <span style="font-weight: bold; color: ${polygonTx.current_confirmations >= polygonTx.required_confirmations ? '#28a745' : '#ffc107'};">
+                        ${polygonTx.current_confirmations}/${polygonTx.required_confirmations}
+                    </span>
+                    <div style="background: #e9ecef; border-radius: 10px; overflow: hidden; height: 8px; margin: 5px 0;">
+                        <div style="background: linear-gradient(90deg, #ffc107 0%, #28a745 100%); height: 100%; width: ${confirmationsPercent}%; transition: width 0.5s ease;"></div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        if (polygonTx.cas_release_tx_hash) {
+            html += `<div><strong>CAS Release TX Hash:</strong> 
+                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${polygonTx.cas_release_tx_hash}</code>
+            </div>`;
+        }
+        
+        html += `
+                <div><strong>Created:</strong> ${new Date(polygonTx.created_at).toLocaleString()}</div>
+                <div><strong>Last Updated:</strong> ${new Date(polygonTx.updated_at).toLocaleString()}</div>
+            </div>
+        `;
+        
+        // Add instructions based on status
+        if (polygonTx.status === 'pending_confirmation') {
+            html += `
+                <div class="info" style="background: #e8f5e8; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                    ⏳ <strong>Processing:</strong> Your wCAS transaction is being confirmed on the Polygon network.
+                </div>
+            `;
+        } else if (polygonTx.status === 'completed') {
+            html += `
+                <div class="success">
+                    ✅ <strong>Complete!</strong> Your CAS tokens have been released to your Cascoin address.
                 </div>
             `;
         }
@@ -376,6 +488,10 @@ window.initializeBridgeRealtime = function(userAddress) {
     
     client.on('wcasReturnIntentionUpdate', (intention) => {
         uiUpdater.updateWcasReturnIntentionStatus(intention);
+    });
+    
+    client.on('polygonTransactionUpdate', (polygonTx) => {
+        uiUpdater.updatePolygonTransactionStatus(polygonTx);
     });
     
     client.on('error', (error) => {

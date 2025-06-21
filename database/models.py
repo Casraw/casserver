@@ -25,6 +25,10 @@ class CasDeposit(Base):
     status = Column(String, default="pending", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Added fields for confirmation tracking
+    current_confirmations = Column(Integer, default=0)
+    required_confirmations = Column(Integer, default=12)
+    deposit_tx_hash = Column(String, nullable=True)  # Track the transaction hash
 
     mint_tx_hash = Column(String, nullable=True)
 
@@ -57,6 +61,9 @@ class PolygonTransaction(Base):
     status = Column(String, default="pending", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Added fields for confirmation tracking
+    current_confirmations = Column(Integer, default=0)
+    required_confirmations = Column(Integer, default=12)
 
     cas_release_tx_hash = Column(String, nullable=True)
 

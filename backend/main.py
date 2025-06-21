@@ -5,21 +5,44 @@ from backend.api import bridge_api
 from backend.api import internal_api # Added
 from backend.api import fee_routes # Added for fee calculations
 from backend.api import websocket_api # Added for real-time updates
-from backend.database import engine #, Base (Models are in database.models now)
+from backend.database import engine, SessionLocal #, Base (Models are in database.models now)
 from database.models import Base # Import Base from where it's defined
 from database.models import create_db_tables
+from database.migrations import run_all_migrations
+import logging
 
-# Create database tables on startup if they don't exist
-# In a production app, you might use Alembic for migrations.
-# create_db_tables() # Call the function to create tables
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Cascoin-Polygon Bridge API")
 
 @app.on_event("startup")
 async def startup_event():
-    # This is a good place to ensure tables are created.
-    create_db_tables()
-    pass
+    """
+    Initialize database and run migrations on startup
+    """
+    logger.info("Starting Cascoin Bridge API - Initializing database...")
+    
+    try:
+        # Create tables if they don't exist
+        create_db_tables()
+        logger.info("Database tables created/verified.")
+        
+        # Run automatic migrations
+        logger.info("Running database migrations...")
+        db = SessionLocal()
+        try:
+            run_all_migrations(db)
+            logger.info("Database migrations completed successfully.")
+        finally:
+            db.close()
+            
+        logger.info("Database initialization completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
 
 app.include_router(bridge_api.router, prefix="/api", tags=["Bridge Operations"])
 app.include_router(internal_api.router, prefix="/internal", tags=["Internal Bridge Operations"]) # Added

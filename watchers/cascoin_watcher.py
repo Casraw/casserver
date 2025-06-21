@@ -53,6 +53,10 @@ class CasDeposit(Base):
     status = Column(String, default="pending", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Added fields for confirmation tracking
+    current_confirmations = Column(Integer, default=0)
+    required_confirmations = Column(Integer, default=12)
+    deposit_tx_hash = Column(String, nullable=True)  # Track the transaction hash
     mint_tx_hash = Column(String, nullable=True)
 
     def __repr__(self):
@@ -139,6 +143,99 @@ def trigger_wcas_minting(deposit_id: int, amount_to_mint: float, recipient_polyg
         return False
 
 # --- Watcher Logic ---
+def check_confirmation_updates():
+    """
+    Check deposits that are in 'pending_confirmation' status and update their confirmation count
+    """
+    db: DbSession = SessionLocal()
+    try:
+        logger.info("Checking confirmation updates...")
+
+        # Get deposits that are waiting for confirmations
+        pending_confirmations = db.query(CasDeposit).filter(CasDeposit.status == "pending_confirmation").all()
+
+        if not pending_confirmations:
+            logger.info("No deposits waiting for confirmations.")
+            return
+
+        logger.info(f"Found {len(pending_confirmations)} deposit(s) waiting for confirmations.")
+
+        for deposit_record in pending_confirmations:
+            if not deposit_record.deposit_tx_hash:
+                logger.warning(f"Deposit ID {deposit_record.id} has no transaction hash. Skipping confirmation check.")
+                continue
+
+            try:
+                # Get transaction details
+                tx_response = cascoin_rpc_call("gettransaction", [deposit_record.deposit_tx_hash])
+                
+                if tx_response is None or tx_response.get("error"):
+                    logger.warning(f"Could not get transaction details for {deposit_record.deposit_tx_hash}")
+                    continue
+
+                tx_data = tx_response.get("result", {})
+                confirmations = tx_data.get("confirmations", 0)
+                
+                # Update confirmation count
+                old_confirmations = deposit_record.current_confirmations
+                deposit_record.current_confirmations = confirmations
+                deposit_record.required_confirmations = CONFIRMATIONS_REQUIRED
+                deposit_record.updated_at = func.now()
+                
+                logger.info(f"Deposit ID {deposit_record.id}: confirmations updated from {old_confirmations} to {confirmations}/{CONFIRMATIONS_REQUIRED}")
+
+                # Check if fully confirmed
+                if confirmations >= CONFIRMATIONS_REQUIRED:
+                    deposit_record.status = "confirmed"
+                    logger.info(f"Deposit ID {deposit_record.id} is now fully confirmed with {confirmations} confirmations.")
+                    
+                    # Extract amount from transaction data
+                    if deposit_record.received_amount is None:
+                        # Try to get amount from transaction details
+                        for detail in tx_data.get("details", []):
+                            if detail.get("address") == deposit_record.cascoin_deposit_address and detail.get("category") == "receive":
+                                deposit_record.received_amount = abs(detail.get("amount", 0))
+                                break
+                    
+                    # Trigger minting process
+                    if deposit_record.received_amount and deposit_record.received_amount > 0:
+                        mint_triggered = trigger_wcas_minting(
+                            deposit_id=deposit_record.id,
+                            amount_to_mint=deposit_record.received_amount,
+                            recipient_polygon_address=deposit_record.polygon_address,
+                            cas_deposit_address=deposit_record.cascoin_deposit_address
+                        )
+                        
+                        if mint_triggered:
+                            deposit_record.status = "mint_triggered"
+                            logger.info(f"wCAS minting triggered for deposit ID {deposit_record.id}")
+                        else:
+                            deposit_record.status = "mint_trigger_failed"
+                            logger.error(f"Failed to trigger minting for deposit ID {deposit_record.id}")
+
+                db.commit()
+                
+                # Send websocket update
+                try:
+                    import requests
+                    headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+                    notify_payload = {"deposit_id": deposit_record.id}
+                    requests.post(f"{BRIDGE_API_URL}/notify_deposit_update", json=notify_payload, headers=headers, timeout=5)
+                except Exception as e:
+                    logger.warning(f"Failed to send websocket notification for deposit {deposit_record.id}: {e}")
+
+            except Exception as e:
+                logger.error(f"Error checking confirmations for deposit {deposit_record.id}: {e}", exc_info=True)
+                db.rollback()
+
+    except Exception as e:
+        logger.error(f"Error during confirmation checking cycle: {e}", exc_info=True)
+        if db.is_active:
+            db.rollback()
+    finally:
+        if db.is_active:
+            db.close()
+
 def check_cascoin_transactions():
     db: DbSession = SessionLocal()
     try:
@@ -157,7 +254,50 @@ def check_cascoin_transactions():
             address_str = deposit_record.cascoin_deposit_address
             logger.info(f"Checking address: {address_str} for CasDeposit ID: {deposit_record.id}")
 
-            # Call listunspent for the specific address
+            # First check for any unconfirmed transactions (0 confirmations)
+            unconfirmed_params = [0, 0, [address_str], False]
+            unconfirmed_response = cascoin_rpc_call("listunspent", unconfirmed_params)
+            
+            if unconfirmed_response and unconfirmed_response.get("result"):
+                unconfirmed_txs = unconfirmed_response.get("result", [])
+                for utxo in unconfirmed_txs:
+                    txid = utxo.get('txid')
+                    vout_index = utxo.get('vout')
+                    amount_received_cas = utxo.get('amount')
+                    confirmations = utxo.get('confirmations', 0)
+                    
+                    if not all([txid, isinstance(vout_index, int), isinstance(amount_received_cas, (float, int))]):
+                        continue
+                    
+                    # Check if this transaction is already tracked
+                    existing_processed = db.query(ProcessedCascoinTxs).filter_by(
+                        cascoin_txid=txid,
+                        cascoin_vout_index=vout_index
+                    ).first()
+                    
+                    if not existing_processed and confirmations < CONFIRMATIONS_REQUIRED:
+                        # New unconfirmed transaction - update deposit to pending_confirmation
+                        deposit_record.status = "pending_confirmation"
+                        deposit_record.deposit_tx_hash = txid
+                        deposit_record.received_amount = amount_received_cas
+                        deposit_record.current_confirmations = confirmations
+                        deposit_record.required_confirmations = CONFIRMATIONS_REQUIRED
+                        deposit_record.updated_at = func.now()
+                        
+                        logger.info(f"New unconfirmed transaction detected for deposit {deposit_record.id}: {txid} with {confirmations} confirmations")
+                        db.commit()
+                        
+                        # Send websocket notification
+                        try:
+                            headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+                            notify_payload = {"deposit_id": deposit_record.id}
+                            requests.post(f"{BRIDGE_API_URL}/notify_deposit_update", json=notify_payload, headers=headers, timeout=5)
+                        except Exception as e:
+                            logger.warning(f"Failed to send websocket notification for deposit {deposit_record.id}: {e}")
+                        
+                        continue  # Skip to next deposit, this one is now being tracked
+
+            # Call listunspent for the specific address for confirmed transactions
             # Parameters: [minconf, maxconf, ["address",...], include_unsafe, query_options]
             # We want confirmed UTXOs, so include_unsafe = False
             # query_options can be omitted or set to default if not needed.
@@ -283,6 +423,7 @@ def main_loop():
     while True:
         try:
             check_cascoin_transactions()
+            check_confirmation_updates()
         except Exception as e:
             logger.error(f"Unhandled error in main loop: {e}", exc_info=True)
 

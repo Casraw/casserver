@@ -248,3 +248,48 @@ async def initiate_cas_release(
         logger.error(f"{logger_prefix}Unexpected error during CAS release: {e}", exc_info=True)
         crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed")
         raise HTTPException(status_code=500, detail=f"{logger_prefix}An unexpected error occurred: {str(e)}")
+
+
+# --- Notification Endpoints for Websocket Updates ---
+@router.post("/notify_deposit_update")
+async def notify_deposit_update(
+    request: dict,
+    db: Session = Depends(get_db),
+    api_key_verified: bool = Depends(verify_api_key)
+):
+    """
+    Internal endpoint called by watchers to trigger websocket notifications for deposit updates
+    """
+    try:
+        from backend.api.websocket_api import notify_cas_deposit_update
+        deposit_id = request.get("deposit_id")
+        if not deposit_id:
+            raise HTTPException(status_code=400, detail="deposit_id is required")
+        
+        await notify_cas_deposit_update(deposit_id, db)
+        return {"status": "success", "message": "Websocket notification sent"}
+    except Exception as e:
+        logger.error(f"Error sending websocket notification for deposit {request.get('deposit_id')}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send notification: {str(e)}")
+
+
+@router.post("/notify_polygon_transaction_update")
+async def notify_polygon_transaction_update(
+    request: dict,
+    db: Session = Depends(get_db),
+    api_key_verified: bool = Depends(verify_api_key)
+):
+    """
+    Internal endpoint called by watchers to trigger websocket notifications for polygon transaction updates
+    """
+    try:
+        from backend.api.websocket_api import notify_polygon_transaction_update
+        polygon_transaction_id = request.get("polygon_transaction_id")
+        if not polygon_transaction_id:
+            raise HTTPException(status_code=400, detail="polygon_transaction_id is required")
+        
+        await notify_polygon_transaction_update(polygon_transaction_id, db)
+        return {"status": "success", "message": "Websocket notification sent"}
+    except Exception as e:
+        logger.error(f"Error sending websocket notification for polygon tx {request.get('polygon_transaction_id')}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send notification: {str(e)}")

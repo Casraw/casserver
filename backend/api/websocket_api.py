@@ -112,6 +112,9 @@ async def send_initial_status(websocket: WebSocket, user_identifier: str, db: Se
                     "status": deposit.status,
                     "received_amount": deposit.received_amount,
                     "mint_tx_hash": deposit.mint_tx_hash,
+                    "current_confirmations": getattr(deposit, 'current_confirmations', 0),
+                    "required_confirmations": getattr(deposit, 'required_confirmations', 12),
+                    "deposit_tx_hash": getattr(deposit, 'deposit_tx_hash', None),
                     "created_at": deposit.created_at.isoformat() if deposit.created_at else None,
                     "updated_at": deposit.updated_at.isoformat() if deposit.updated_at else None
                 }
@@ -159,6 +162,9 @@ async def notify_cas_deposit_update(deposit_id: int, db: Session):
                     "status": deposit.status,
                     "received_amount": deposit.received_amount,
                     "mint_tx_hash": deposit.mint_tx_hash,
+                    "current_confirmations": getattr(deposit, 'current_confirmations', 0),
+                    "required_confirmations": getattr(deposit, 'required_confirmations', 12),
+                    "deposit_tx_hash": getattr(deposit, 'deposit_tx_hash', None),
                     "created_at": deposit.created_at.isoformat() if deposit.created_at else None,
                     "updated_at": deposit.updated_at.isoformat() if deposit.updated_at else None
                 }
@@ -208,6 +214,8 @@ async def notify_polygon_transaction_update(tx_id: int, db: Session):
                     "polygon_tx_hash": poly_tx.polygon_tx_hash,
                     "status": poly_tx.status,
                     "cas_release_tx_hash": poly_tx.cas_release_tx_hash,
+                    "current_confirmations": getattr(poly_tx, 'current_confirmations', 0),
+                    "required_confirmations": getattr(poly_tx, 'required_confirmations', 12),
                     "created_at": poly_tx.created_at.isoformat() if poly_tx.created_at else None,
                     "updated_at": poly_tx.updated_at.isoformat() if poly_tx.updated_at else None
                 }
