@@ -1,12 +1,13 @@
 # Production Dockerfile for Cascoin-Polygon Bridge
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies including dos2unix
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         nginx \
         supervisor \
         curl \
+        dos2unix \
         && rm -rf /var/lib/apt/lists/*
 
 # Create nginx log directory and files with proper permissions
@@ -36,10 +37,17 @@ COPY nginx/nginx.conf /etc/nginx/nginx.conf
 
 # Create production entrypoint script
 COPY docker-entrypoint.prod.sh /app/docker-entrypoint.prod.sh
-RUN chmod +x /app/docker-entrypoint.prod.sh
 
-# Create supervisor configuration
+# Copy supervisor configuration
 COPY supervisord.conf /etc/supervisor/supervisord.conf
+
+# Convert all shell scripts from Windows line endings to Unix line endings
+RUN find /app -name "*.sh" -type f -exec dos2unix {} \; && \
+    find /app -name "*.py" -type f -exec dos2unix {} \; && \
+    dos2unix /etc/supervisor/supervisord.conf
+
+# Make shell scripts executable
+RUN chmod +x /app/docker-entrypoint.prod.sh
 
 # Set environment
 ENV PYTHONPATH=/app

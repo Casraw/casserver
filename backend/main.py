@@ -12,6 +12,7 @@ from database.migrations import run_all_migrations
 import logging
 import time
 from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy import text
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -28,7 +29,7 @@ def wait_for_database(max_retries=30, retry_delay=2):
             logger.info(f"Attempting to connect to database (attempt {attempt + 1}/{max_retries})...")
             db = SessionLocal()
             # Test the connection
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
             db.close()
             logger.info("Database connection successful!")
             return True

@@ -14,8 +14,8 @@ RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
 # Stage 2: Final Image with Python and Nginx
 FROM python:3.11-slim
 
-# Install Nginx
-RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
+# Install Nginx and dos2unix
+RUN apt-get update && apt-get install -y nginx dos2unix && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -30,6 +30,11 @@ COPY . .
 
 # Copy Nginx configuration, overwriting the default
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
+
+# Convert all shell scripts from Windows line endings to Unix line endings
+RUN find /app -name "*.sh" -type f -exec dos2unix {} \; && \
+    find /app -name "*.py" -type f -exec dos2unix {} \; && \
+    dos2unix /etc/nginx/nginx.conf
 
 # Make scripts executable
 RUN chmod +x /app/docker-entrypoint.sh
