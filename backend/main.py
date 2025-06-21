@@ -10,12 +10,39 @@ from database.models import Base # Import Base from where it's defined
 from database.models import create_db_tables
 from database.migrations import run_all_migrations
 import logging
+import time
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Cascoin-Polygon Bridge API")
+
+def wait_for_database(max_retries=30, retry_delay=2):
+    """
+    Wait for database to be ready with retry logic
+    """
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Attempting to connect to database (attempt {attempt + 1}/{max_retries})...")
+            db = SessionLocal()
+            # Test the connection
+            db.execute("SELECT 1")
+            db.close()
+            logger.info("Database connection successful!")
+            return True
+        except (OperationalError, ProgrammingError) as e:
+            logger.warning(f"Database connection failed (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                logger.error("Max retries reached. Database is not available.")
+                raise
+        except Exception as e:
+            logger.error(f"Unexpected error connecting to database: {e}")
+            raise
 
 @app.on_event("startup")
 async def startup_event():
@@ -25,7 +52,11 @@ async def startup_event():
     logger.info("Starting Cascoin Bridge API - Initializing database...")
     
     try:
+        # Wait for database to be ready
+        wait_for_database()
+        
         # Create tables if they don't exist
+        logger.info("Creating/verifying database tables...")
         create_db_tables()
         logger.info("Database tables created/verified.")
         

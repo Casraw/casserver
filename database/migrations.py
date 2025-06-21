@@ -24,8 +24,11 @@ def column_exists(db: Session, table_name: str, column_name: str) -> bool:
         column_names = [col['name'] for col in columns]
         
         return column_name in column_names
+    except (ProgrammingError, OperationalError) as e:
+        logger.error(f"Database error checking if column {column_name} exists in {table_name}: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Error checking if column {column_name} exists in {table_name}: {e}")
+        logger.error(f"Unexpected error checking if column {column_name} exists in {table_name}: {e}")
         return False
 
 def add_column_if_not_exists(db: Session, table_name: str, column_name: str, column_definition: str):
