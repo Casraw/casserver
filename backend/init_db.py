@@ -2,6 +2,7 @@
 import logging
 import sys
 import time
+from sqlalchemy import text
 from database.models import create_db_tables
 from database.migrations import run_all_migrations
 from backend.database import SessionLocal
@@ -20,7 +21,7 @@ def wait_for_database(max_retries=30, delay=2):
         try:
             db = SessionLocal()
             # Try a simple query to test connection
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
             db.close()
             logger.info("✅ Database is ready!")
             return True
