@@ -97,10 +97,15 @@ async def websocket_endpoint(websocket: WebSocket, user_identifier: str, db: Ses
 async def send_initial_status(websocket: WebSocket, user_identifier: str, db: Session):
     """Send initial status for all relevant records for this user"""
     try:
-        # Get CAS deposits for this user (assuming user_identifier is polygon_address)
-        cas_deposits = db.query(CasDeposit).filter(
-            CasDeposit.polygon_address == user_identifier
-        ).all()
+        # Order deposits so that the oldest records are sent first and the newest last.
+        # This ensures the frontend UI ultimately displays the most recent deposit,
+        # preventing an older (already processed) deposit from overwriting the view.
+        cas_deposits = (
+            db.query(CasDeposit)
+            .filter(CasDeposit.polygon_address == user_identifier)
+            .order_by(CasDeposit.created_at.asc())
+            .all()
+        )
         
         for deposit in cas_deposits:
             await websocket.send_text(json.dumps({
@@ -121,9 +126,12 @@ async def send_initial_status(websocket: WebSocket, user_identifier: str, db: Se
             }))
         
         # Get wCAS to CAS return intentions
-        return_intentions = db.query(WcasToCasReturnIntention).filter(
-            WcasToCasReturnIntention.user_polygon_address == user_identifier
-        ).all()
+        return_intentions = (
+            db.query(WcasToCasReturnIntention)
+            .filter(WcasToCasReturnIntention.user_polygon_address == user_identifier)
+            .order_by(WcasToCasReturnIntention.created_at.asc())
+            .all()
+        )
         
         for intention in return_intentions:
             await websocket.send_text(json.dumps({
