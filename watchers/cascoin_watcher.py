@@ -193,9 +193,18 @@ def check_confirmation_updates():
                 new_confirmations = tx_data.get("confirmations", 0)
                 old_confirmations = deposit_record.current_confirmations
 
-                # Only proceed if the confirmation count has actually changed.
-                if new_confirmations == old_confirmations:
-                    logger.info(f"Deposit ID {deposit_record.id}: Confirmations unchanged at {new_confirmations}. No update needed.")
+                # If already fully confirmed but status wasn't updated yet, proceed
+                if new_confirmations >= CONFIRMATIONS_REQUIRED and deposit_record.status != "cas_confirmed_pending_mint":
+                    logger.info(
+                        f"Deposit ID {deposit_record.id}: Reached required confirmations (" \
+                        f"{new_confirmations}/{CONFIRMATIONS_REQUIRED}) while status is still '{deposit_record.status}'."
+                    )
+                    # fall through to processing block below
+                elif new_confirmations == old_confirmations:
+                    # No change and not yet fully confirmed – skip to next deposit
+                    logger.info(
+                        f"Deposit ID {deposit_record.id}: Confirmations unchanged at {new_confirmations}. No update needed."
+                    )
                     continue
                 
                 # --- Confirmation count has changed, process update ---
