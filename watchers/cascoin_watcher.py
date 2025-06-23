@@ -143,6 +143,16 @@ def trigger_wcas_minting(deposit_id: int, amount_to_mint: float, recipient_polyg
         return False
 
 # --- Watcher Logic ---
+def _send_deposit_update_notification(deposit_id: int):
+    """Helper to send a websocket notification for a deposit update."""
+    try:
+        headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+        notify_payload = {"deposit_id": deposit_id}
+        requests.post(f"{BRIDGE_API_URL}/notify_deposit_update", json=notify_payload, headers=headers, timeout=5)
+        logger.info(f"Sent websocket notification for deposit {deposit_id}.")
+    except Exception as e:
+        logger.warning(f"Failed to send websocket notification for deposit {deposit_id}: {e}")
+
 def check_confirmation_updates():
     """
     Check deposits that are in 'pending_confirmation' status and update their confirmation count
@@ -189,8 +199,9 @@ def check_confirmation_updates():
                 
                 # Check if fully confirmed
                 if new_confirmations >= CONFIRMATIONS_REQUIRED:
-                    deposit_record.status = "confirmed"
-                    logger.info(f"Deposit ID {deposit_record.id} is now fully confirmed with {new_confirmations} confirmations.")
+                    # Set status to what the backend expects for a confirmed deposit ready for minting.
+                    deposit_record.status = "cas_confirmed_pending_mint"
+                    logger.info(f"Deposit ID {deposit_record.id} is now fully confirmed with {new_confirmations} confirmations. Status set to 'cas_confirmed_pending_mint'.")
                     
                     # Extract amount from transaction data if not already present
                     if deposit_record.received_amount is None:
@@ -199,7 +210,13 @@ def check_confirmation_updates():
                                 deposit_record.received_amount = abs(detail.get("amount", 0))
                                 break
                     
-                    # Trigger minting process
+                    # Commit the status update BEFORE triggering the minting process. This is crucial.
+                    deposit_record.updated_at = func.now()
+                    db.commit()
+                    _send_deposit_update_notification(deposit_record.id) # Notify for confirmed status
+
+                    # Now, trigger the minting process.
+                    # This runs outside the previous DB transaction to ensure backend sees the committed status.
                     if deposit_record.received_amount and deposit_record.received_amount > 0:
                         mint_triggered = trigger_wcas_minting(
                             deposit_id=deposit_record.id,
@@ -214,21 +231,20 @@ def check_confirmation_updates():
                         else:
                             deposit_record.status = "mint_trigger_failed"
                             logger.error(f"Failed to trigger minting for deposit ID {deposit_record.id}")
-                
-                # Always set updated_at when making a change
-                deposit_record.updated_at = func.now()
-                db.commit()
-                logger.info(f"Deposit ID {deposit_record.id}: Committed status '{deposit_record.status}' and confirmations '{deposit_record.current_confirmations}'.")
-                
-                # Send websocket update about the change
-                try:
-                    headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
-                    notify_payload = {"deposit_id": deposit_record.id}
-                    requests.post(f"{BRIDGE_API_URL}/notify_deposit_update", json=notify_payload, headers=headers, timeout=5)
-                    logger.info(f"Sent websocket notification for deposit {deposit_record.id}.")
-                except Exception as e:
-                    logger.warning(f"Failed to send websocket notification for deposit {deposit_record.id} after update: {e}")
+                        
+                        # Commit the post-minting-trigger status
+                        deposit_record.updated_at = func.now()
+                        db.commit()
+                        _send_deposit_update_notification(deposit_record.id) # Notify for mint status
+                        logger.info(f"Deposit ID {deposit_record.id}: Committed final status '{deposit_record.status}'.")
 
+                else:
+                    # If not fully confirmed, just update the confirmation count and commit.
+                    deposit_record.updated_at = func.now()
+                    db.commit()
+                    _send_deposit_update_notification(deposit_record.id)
+                    logger.info(f"Deposit ID {deposit_record.id}: Committed updated confirmation count '{deposit_record.current_confirmations}'.")
+                
             except Exception as e:
                 logger.error(f"An error occurred while checking confirmations for deposit {deposit_record.id}: {e}", exc_info=True)
                 db.rollback()
