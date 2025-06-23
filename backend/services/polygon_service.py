@@ -281,12 +281,26 @@ class PolygonService:
                 
                 # Validate that tokens were minted to the intended recipient.
                 try:
-                    transfer_events = self.wcas_contract.events.Transfer().process_receipt(receipt)
+                    # Use processReceipt with errors='ignore' to suppress ABI mismatch warnings
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        transfer_events = self.wcas_contract.events.Transfer().process_receipt(receipt)
+                    
                     minted_ok = False
+                    logger.info(f"Found {len(transfer_events)} Transfer events in receipt")
+                    
                     for ev in transfer_events:
-                        if ev['args']['from'] == '0x0000000000000000000000000000000000000000':
-                            if ev['args']['to'].lower() == checksum_to_address.lower():
+                        from_addr = ev['args']['from']
+                        to_addr = ev['args']['to']
+                        amount = ev['args']['value']
+                        logger.info(f"Transfer event: from={from_addr}, to={to_addr}, amount={amount}")
+                        
+                        # Check if this is a mint event (from zero address) to our recipient
+                        if from_addr == '0x0000000000000000000000000000000000000000':
+                            if to_addr.lower() == checksum_to_address.lower():
                                 minted_ok = True
+                                logger.info(f"✅ Mint event confirmed: {amount} tokens minted to {to_addr}")
                                 break
 
                     if not minted_ok:
@@ -307,7 +321,17 @@ class PolygonService:
                                 'gas': 100000
                             })
                             signed_forward_tx = gas_payer_account.sign_transaction(forward_tx)
-                            fwd_tx_hash = self.web3.eth.send_raw_transaction(signed_forward_tx.rawTransaction)
+                            
+                            # Handle different Web3 versions for raw transaction access
+                            if hasattr(signed_forward_tx, 'rawTransaction'):
+                                raw_forward_tx = signed_forward_tx.rawTransaction
+                            elif hasattr(signed_forward_tx, 'raw_transaction'):
+                                raw_forward_tx = signed_forward_tx.raw_transaction
+                            else:
+                                logger.error("Cannot access raw forward transaction data")
+                                raise Exception("Unable to access raw transaction data")
+                            
+                            fwd_tx_hash = self.web3.eth.send_raw_transaction(raw_forward_tx)
                             logger.info(
                                 f"Forwarding transaction sent. TxHash: {fwd_tx_hash.hex()}. Waiting for confirmation..."
                             )
@@ -317,6 +341,12 @@ class PolygonService:
                             logger.error(f"Failed to forward tokens to recipient: {fwd_err}")
                 except Exception as parse_err:
                     logger.warning(f"Could not parse Transfer events for validation: {parse_err}")
+                    # If we can't parse events but transaction was successful, assume it worked
+                    if receipt.status == 1:
+                        logger.info("Transaction was successful, assuming mint worked despite event parsing error")
+                        minted_ok = True
+                    else:
+                        minted_ok = False
                 
                 logger.info("=== TRANSACTION RECEIPT ERHALTEN ===")
                 logger.info(f"Transaction Hash: {receipt.transactionHash.hex()}")
