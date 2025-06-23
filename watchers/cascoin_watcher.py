@@ -186,7 +186,6 @@ def check_confirmation_updates():
 
                 deposit_record.current_confirmations = new_confirmations
                 deposit_record.required_confirmations = CONFIRMATIONS_REQUIRED
-                deposit_record.updated_at = func.now()
                 
                 # Check if fully confirmed
                 if new_confirmations >= CONFIRMATIONS_REQUIRED:
@@ -215,7 +214,9 @@ def check_confirmation_updates():
                         else:
                             deposit_record.status = "mint_trigger_failed"
                             logger.error(f"Failed to trigger minting for deposit ID {deposit_record.id}")
-
+                
+                # Always set updated_at when making a change
+                deposit_record.updated_at = func.now()
                 db.commit()
                 logger.info(f"Deposit ID {deposit_record.id}: Committed status '{deposit_record.status}' and confirmations '{deposit_record.current_confirmations}'.")
                 
@@ -258,150 +259,64 @@ def check_cascoin_transactions():
             address_str = deposit_record.cascoin_deposit_address
             logger.info(f"Checking address: {address_str} for CasDeposit ID: {deposit_record.id}")
 
-            # First check for any unconfirmed transactions (0 confirmations)
-            unconfirmed_params = [0, 0, [address_str], False]
-            unconfirmed_response = cascoin_rpc_call("listunspent", unconfirmed_params)
-            
-            if unconfirmed_response and unconfirmed_response.get("result"):
-                unconfirmed_txs = unconfirmed_response.get("result", [])
-                for utxo in unconfirmed_txs:
-                    txid = utxo.get('txid')
-                    vout_index = utxo.get('vout')
-                    amount_received_cas = utxo.get('amount')
-                    confirmations = utxo.get('confirmations', 0)
-                    
-                    if not all([txid, isinstance(vout_index, int), isinstance(amount_received_cas, (float, int))]):
-                        continue
-                    
-                    # Check if this transaction is already tracked
-                    existing_processed = db.query(ProcessedCascoinTxs).filter_by(
-                        cascoin_txid=txid,
-                        cascoin_vout_index=vout_index
-                    ).first()
-                    
-                    if not existing_processed and confirmations < CONFIRMATIONS_REQUIRED:
-                        # New unconfirmed transaction - update deposit to pending_confirmation
-                        deposit_record.status = "pending_confirmation"
-                        deposit_record.deposit_tx_hash = txid
-                        deposit_record.received_amount = amount_received_cas
-                        deposit_record.current_confirmations = confirmations
-                        deposit_record.required_confirmations = CONFIRMATIONS_REQUIRED
-                        deposit_record.updated_at = func.now()
-                        
-                        logger.info(f"New unconfirmed transaction detected for deposit {deposit_record.id}: {txid} with {confirmations} confirmations")
-                        db.commit()
-                        
-                        # Send websocket notification
-                        try:
-                            headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
-                            notify_payload = {"deposit_id": deposit_record.id}
-                            requests.post(f"{BRIDGE_API_URL}/notify_deposit_update", json=notify_payload, headers=headers, timeout=5)
-                        except Exception as e:
-                            logger.warning(f"Failed to send websocket notification for deposit {deposit_record.id}: {e}")
-                        
-                        continue  # Skip to next deposit, this one is now being tracked
-
-            # Call listunspent for the specific address for confirmed transactions
-            # Parameters: [minconf, maxconf, ["address",...], include_unsafe, query_options]
-            # We want confirmed UTXOs, so include_unsafe = False
-            # query_options can be omitted or set to default if not needed.
-            # Note: some nodes might have slightly different param order or requirements for listunspent.
-            # This assumes a common Bitcoin Core-like API.
-            listunspent_params = [CONFIRMATIONS_REQUIRED, 9999999, [address_str], False]
-
+            # Find any unspent transaction for the address. We start with 0 confirmations.
+            # This will find any new transaction, regardless of its current confirmation count.
+            listunspent_params = [0, 9999999, [address_str], False]
             rpc_response = cascoin_rpc_call("listunspent", listunspent_params)
 
-            if rpc_response is None: # Error logged by cascoin_rpc_call
+            if rpc_response is None:
                 logger.warning(f"RPC call 'listunspent' failed for address {address_str}. Skipping this address for now.")
                 continue
-
-            # Check for RPC errors
+            
             if rpc_response.get("error") is not None:
                 logger.error(f"RPC error for listunspent on address {address_str}: {rpc_response['error']}")
                 continue
 
-            # Extract the result from the RPC response
             unspent_txs = rpc_response.get("result", [])
-
-            if not isinstance(unspent_txs, list):
-                logger.error(f"Unexpected format for listunspent result for address {address_str}. Expected list, got: {type(unspent_txs)}. Response: {rpc_response}")
-                continue
-
             if not unspent_txs:
-                logger.info(f"No confirmed UTXOs found for address {address_str} with {CONFIRMATIONS_REQUIRED} confirmations.")
+                logger.info(f"No transactions found for address {address_str}.")
                 continue
 
-            logger.info(f"Found {len(unspent_txs)} UTXO(s) for address {address_str} meeting {CONFIRMATIONS_REQUIRED} confirmations.")
-
+            # Process the first unprocessed UTXO we find for this deposit address.
+            # This assumes a 1-to-1 relationship between a deposit address and a deposit event.
             for utxo in unspent_txs:
+                txid = utxo.get('txid')
+                vout_index = utxo.get('vout')
+
+                # Verify this UTXO hasn't been used for another deposit.
+                # This check is crucial to prevent re-processing the same on-chain transaction.
+                is_processed = db.query(ProcessedCascoinTxs).filter_by(cascoin_txid=txid, cascoin_vout_index=vout_index).first()
+                if is_processed:
+                    logger.info(f"UTXO {txid}-{vout_index} has already been processed for deposit {is_processed.cas_deposit_id}. Skipping.")
+                    continue
+
+                # Found a new transaction. Associate it with this deposit record.
+                confirmations = utxo.get('confirmations', 0)
+                amount_received_cas = utxo.get('amount')
+                
+                logger.info(f"Detected new transaction {txid} for deposit {deposit_record.id} with {confirmations} confirmations.")
+
+                deposit_record.deposit_tx_hash = txid
+                deposit_record.received_amount = amount_received_cas
+                deposit_record.current_confirmations = confirmations
+                deposit_record.required_confirmations = CONFIRMATIONS_REQUIRED
+                deposit_record.status = "pending_confirmation"  # Hand over to check_confirmation_updates
+                deposit_record.updated_at = func.now()
+
+                db.commit()
+
+                # Send a websocket notification that we've detected the transaction.
                 try:
-                    txid = utxo.get('txid')
-                    vout_index = utxo.get('vout')
-                    amount_received_cas = utxo.get('amount') # Assuming 'amount' is in CAS
-                    actual_confirmations = utxo.get('confirmations')
-
-                    if not all([txid, isinstance(vout_index, int), isinstance(amount_received_cas, (float, int))]):
-                        logger.warning(f"Skipping UTXO with incomplete data for address {address_str}: txid={txid}, vout={vout_index}, amount={amount_received_cas}")
-                        continue
-
-                    logger.info(f"Processing UTXO: TXID={txid}, Vout={vout_index}, Amount={amount_received_cas}, Confirmations={actual_confirmations} for Deposit ID {deposit_record.id}")
-
-                    # Check if this UTXO has already been processed
-                    existing_processed_tx = db.query(ProcessedCascoinTxs).filter_by(
-                        cascoin_txid=txid,
-                        cascoin_vout_index=vout_index
-                    ).first()
-
-                    if existing_processed_tx:
-                        logger.info(f"UTXO {txid}-{vout_index} already processed for CasDeposit ID {existing_processed_tx.cas_deposit_id}. Skipping.")
-                        continue
-
-                    # Store this UTXO as processed
-                    new_processed_tx = ProcessedCascoinTxs(
-                        cascoin_txid=txid,
-                        cascoin_vout_index=vout_index,
-                        cas_deposit_id=deposit_record.id,
-                        amount_received=amount_received_cas
-                    )
-                    db.add(new_processed_tx)
-
-                    # Update CasDeposit record
-                    # For now, assuming one UTXO per deposit triggers minting.
-                    # If aggregation is needed, this logic would change: accumulate amounts,
-                    # and only trigger minting when a threshold is met or after a certain time.
-                    deposit_record.received_amount = amount_received_cas # Overwrites if multiple UTXOs are found, simple model for now
-                    deposit_record.status = "cas_confirmed_pending_mint" # New status
-                    deposit_record.updated_at = func.now()
-
-                    logger.info(f"CasDeposit ID {deposit_record.id} updated: amount={amount_received_cas}, status='cas_confirmed_pending_mint'")
-
-                    # Commit the status change BEFORE calling the API to prevent a race condition
-                    db.commit()
-
-                    # Trigger wCAS minting via backend API
-                    mint_triggered = trigger_wcas_minting(
-                        deposit_id=deposit_record.id,
-                        amount_to_mint=amount_received_cas, # Assuming 1 CAS = 1 wCAS
-                        recipient_polygon_address=deposit_record.polygon_address,
-                        cas_deposit_address=deposit_record.cascoin_deposit_address
-                    )
-
-                    if mint_triggered:
-                        deposit_record.status = "mint_triggered" # Or "mint_initiated"
-                        logger.info(f"wCAS minting successfully triggered for CasDeposit ID {deposit_record.id}.")
-                    else:
-                        deposit_record.status = "mint_trigger_failed"
-                        logger.error(f"Failed to trigger wCAS minting for CasDeposit ID {deposit_record.id}. Status set to 'mint_trigger_failed'.")
-
-                    db.commit() # Commit the final status update (mint_triggered or mint_trigger_failed)
-                    logger.info(f"Successfully processed and committed UTXO {txid}-{vout_index} for CasDeposit ID {deposit_record.id}.")
-
-                except Exception as e_utxo:
-                    logger.error(f"Error processing UTXO {utxo.get('txid')}-{utxo.get('vout')} for deposit {deposit_record.id}: {e_utxo}", exc_info=True)
-                    db.rollback() # Rollback changes for this specific UTXO
-
-        logger.info("Finished Cascoin checking cycle for pending deposits.")
-
+                    headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+                    notify_payload = {"deposit_id": deposit_record.id}
+                    requests.post(f"{BRIDGE_API_URL}/notify_deposit_update", json=notify_payload, headers=headers, timeout=5)
+                    logger.info(f"Sent initial detection notification for deposit {deposit_record.id}.")
+                except Exception as e:
+                    logger.warning(f"Failed to send initial websocket notification for deposit {deposit_record.id}: {e}")
+                
+                # Once we've associated a transaction with this deposit, move to the next deposit.
+                break  # Exit the 'for utxo in unspent_txs' loop
+            
     except Exception as e:
         logger.error(f"Error during Cascoin checking cycle: {e}", exc_info=True)
         if db.is_active:
