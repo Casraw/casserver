@@ -20,8 +20,14 @@ RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
 # Stage 2: Final Image with Python and Nginx
 FROM python:3.11-slim
 
-# Install Nginx and dos2unix
-RUN apt-get update && apt-get install -y nginx dos2unix && rm -rf /var/lib/apt/lists/*
+# Install Nginx, dos2unix, and build tools (including GCC) for production
+RUN apt-get update && apt-get install -y \
+    nginx \
+    dos2unix \
+    gcc \
+    g++ \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
