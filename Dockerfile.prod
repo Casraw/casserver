@@ -8,6 +8,9 @@ RUN apt-get update && \
         supervisor \
         curl \
         dos2unix \
+        gcc \
+        g++ \
+        build-essential \
         && rm -rf /var/lib/apt/lists/*
 
 # Create nginx log directory and files with proper permissions
