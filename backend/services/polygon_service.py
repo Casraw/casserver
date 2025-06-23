@@ -81,7 +81,7 @@ class PolygonService:
             logger.warning(f"Could not call decimals() on wCAS contract. ABI might be incorrect or contract not deployed/verified: {e}. Assuming 18 decimals.")
             self.wcas_decimals = 18 # Fallback, risky.
 
-    def mint_wcas(self, recipient_address: str, amount_cas: float, gas_payer_private_key: Optional[str] = None) -> Optional[str]:
+    def mint_wcas(self, recipient_address: str, amount_cas: float, custom_private_key: Optional[str] = None, gas_payer_private_key: Optional[str] = None) -> Optional[str]:
         """
         KORRIGIERTE Version - Meta-Transaction kompatibel mit erhöhtem Gas Limit
         Behebt Meta-Transaction Probleme wenn Owner = Minter = gleiche Adresse
@@ -89,13 +89,17 @@ class PolygonService:
         Args:
             recipient_address: Address to receive the minted tokens
             amount_cas: Amount of CAS to mint (will be converted to wei)
-            gas_payer_private_key: Optional private key for gas payment (BYO-gas flow)
+            custom_private_key: Optional private key for gas payment (BYO-gas flow)
+            gas_payer_private_key: Legacy parameter name for backward compatibility
         """
         try:
+            # Support both parameter names for backward compatibility
+            gas_private_key = custom_private_key or gas_payer_private_key
+            
             # Determine which account to use for gas payment
-            if gas_payer_private_key:
+            if gas_private_key:
                 # BYO-gas flow: use the provided private key for gas payment
-                gas_payer_account = self.web3.eth.account.from_key(gas_payer_private_key)
+                gas_payer_account = self.web3.eth.account.from_key(gas_private_key)
                 gas_payer_address = gas_payer_account.address
                 logger.info(f"Using BYO-gas flow with gas payer: {gas_payer_address}")
             else:
@@ -243,6 +247,10 @@ class PolygonService:
                     final_tx_hash = tx_hash.hex()
                 else:
                     final_tx_hash = str(tx_hash)
+                
+                # Ensure the hash has 0x prefix
+                if not final_tx_hash.startswith('0x'):
+                    final_tx_hash = '0x' + final_tx_hash
                     
                 logger.info(f"=== wCAS MINT TRANSACTION GESENDET ===")
                 logger.info(f"Transaction Hash: {final_tx_hash}")
@@ -350,3 +358,66 @@ class PolygonService:
         except Exception as e:
             logger.error(f"🚨 ALLGEMEINER MINT FEHLER: {e}", exc_info=True)
             return None
+
+
+
+# HD Wallet functions for BYO-gas functionality
+def generate_hd_address(index: Optional[int] = None) -> tuple[str, str, int]:
+    """
+    Generate a new HD wallet address for gas deposits
+    
+    Args:
+        index: Optional specific index to use, otherwise finds next available
+        
+    Returns:
+        tuple: (address, private_key, hd_index)
+    """
+    import os
+    from mnemonic import Mnemonic
+    from eth_account import Account
+    
+    # Get mnemonic from environment
+    mnemonic_phrase = os.environ.get('HD_MNEMONIC')
+    if not mnemonic_phrase:
+        raise ValueError("HD_MNEMONIC environment variable not set")
+    
+    # Validate mnemonic
+    mnemo = Mnemonic("english")
+    if not mnemo.check(mnemonic_phrase):
+        raise ValueError("Invalid HD_MNEMONIC phrase")
+    
+    # Find next available index if not specified
+    if index is None:
+        # For now, use a simple counter approach
+        # In production, you might want to track used indices in database
+        index = 0
+        # TODO: Check database for highest used index and increment
+    
+    # Enable HD wallet features (they are disabled by default)
+    Account.enable_unaudited_hdwallet_features()
+    
+    # Generate account using BIP-44 path for Ethereum: m/44'/60'/0'/0/{index}
+    account = Account.from_mnemonic(
+        mnemonic_phrase,
+        account_path=f"m/44'/60'/0'/0/{index}"
+    )
+    
+    address = account.address
+    private_key = "0x" + account.key.hex()
+    
+    logger.info(f"Generated HD address {address} at index {index}")
+    
+    return address, private_key, index
+
+def generate_hd_private_key(hd_index: int) -> str:
+    """
+    Generate private key for a specific HD index
+    
+    Args:
+        hd_index: The HD wallet index to generate key for
+        
+    Returns:
+        str: The private key for the given index
+    """
+    address, private_key, index = generate_hd_address(hd_index)
+    return private_key

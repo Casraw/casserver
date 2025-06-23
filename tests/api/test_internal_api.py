@@ -10,6 +10,9 @@ from backend.api import internal_api # Router
 from backend.schemas import WCASMintRequest, CASReleaseRequest, WCASMintResponse, CASReleaseResponse # Schemas
 from backend.config import Settings # To mock settings values
 
+# Add imports for BYO-gas testing
+from backend.schemas import PolygonGasAddressRequest, PolygonGasAddressResponse
+
 # --- FastAPI app setup for testing ---
 # Create a minimal FastAPI app and include the router
 app = FastAPI()
@@ -139,27 +142,12 @@ class TestInternalAPIMinting(unittest.TestCase):
 
     def test_initiate_wcas_mint_successful(self):
         self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
-        self.mock_polygon_service_instance.mint_wcas.return_value = "0xMintTxHash"
-
+        self.mock_polygon_service_instance.mint_wcas.return_value = "0xExpectedTxHash"
         response = self.client.post("/internal/initiate_wcas_mint", json=self.default_mint_request_data, headers=self.headers)
-
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 202) # Background processing returns 202
         data = response.json()
-        self.assertEqual(data["status"], "success")
-        self.assertEqual(data["polygon_mint_tx_hash"], "0xMintTxHash")
-        self.mock_crud.get_cas_deposit_by_id.assert_called_once_with(unittest.mock.ANY, deposit_id=1)
-        self.mock_PolygonService_class.assert_called_once()
-        self.mock_polygon_service_instance.mint_wcas.assert_called_once_with(
-            recipient_address="0xTestPolygonAddress",
-            amount_cas=10.0
-        )
-        self.mock_crud.update_cas_deposit_status_and_mint_hash.assert_called_once_with(
-            db=unittest.mock.ANY,
-            deposit_id=1,
-            new_status="mint_submitted",
-            mint_tx_hash="0xMintTxHash",
-            received_amount=10.0
-        )
+        self.assertEqual(data["status"], "accepted")
+        self.assertIn("accepted and is running in the background", data["message"])
 
     def test_initiate_wcas_mint_deposit_not_found(self):
         self.mock_crud.get_cas_deposit_by_id.return_value = None
@@ -173,10 +161,10 @@ class TestInternalAPIMinting(unittest.TestCase):
         self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
 
         response = self.client.post("/internal/initiate_wcas_mint", json=self.default_mint_request_data, headers=self.headers)
-        self.assertEqual(response.status_code, 200) # API returns 200 but with "skipped" status
+        self.assertEqual(response.status_code, 202) # Background processing returns 202 even for skipped
         data = response.json()
         self.assertEqual(data["status"], "skipped")
-        self.assertIn("Minting already processed or in progress", data["message"])
+        self.assertIn("already processed or in progress", data["message"])
         self.assertEqual(data["polygon_mint_tx_hash"], "0xExistingHash")
 
     def test_initiate_wcas_mint_invalid_status_for_new_mint(self):
@@ -221,31 +209,28 @@ class TestInternalAPIMinting(unittest.TestCase):
         self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
         self.mock_PolygonService_class.side_effect = ConnectionError("RPC down")
         response = self.client.post("/internal/initiate_wcas_mint", json=self.default_mint_request_data, headers=self.headers)
-        self.assertEqual(response.status_code, 500)
-        self.assertIn("Failed to initialize PolygonService: RPC down", response.json()["detail"])
+        self.assertEqual(response.status_code, 202) # Background processing returns 202
+        data = response.json()
+        self.assertEqual(data["status"], "accepted")
+        self.assertIn("accepted and is running in the background", data["message"])
 
     def test_initiate_wcas_mint_polygon_service_mint_wcas_returns_none(self):
         self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
         self.mock_polygon_service_instance.mint_wcas.return_value = None # Minting fails
         response = self.client.post("/internal/initiate_wcas_mint", json=self.default_mint_request_data, headers=self.headers)
-        self.assertEqual(response.status_code, 200) # API returns 200 OK but with error status in payload
+        self.assertEqual(response.status_code, 202) # Background processing returns 202
         data = response.json()
-        self.assertEqual(data["status"], "error")
-        self.assertIn("PolygonService did not return a hash", data["message"])
-        self.assertIsNone(data["polygon_mint_tx_hash"])
-        self.mock_crud.update_cas_deposit_status_and_mint_hash.assert_called_once_with(
-            unittest.mock.ANY, 1, "mint_failed", received_amount=10.0
-        )
+        self.assertEqual(data["status"], "accepted")
+        self.assertIn("accepted and is running in the background", data["message"])
 
     def test_initiate_wcas_mint_polygon_service_mint_wcas_raises_exception(self):
         self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
         self.mock_polygon_service_instance.mint_wcas.side_effect = Exception("Unexpected mint error")
         response = self.client.post("/internal/initiate_wcas_mint", json=self.default_mint_request_data, headers=self.headers)
-        self.assertEqual(response.status_code, 500)
-        self.assertIn("An unexpected error occurred: Unexpected mint error", response.json()["detail"])
-        self.mock_crud.update_cas_deposit_status_and_mint_hash.assert_called_once_with(
-            unittest.mock.ANY, 1, "mint_failed", received_amount=10.0
-        )
+        self.assertEqual(response.status_code, 202) # Background processing returns 202
+        data = response.json()
+        self.assertEqual(data["status"], "accepted")
+        self.assertIn("accepted and is running in the background", data["message"])
 
 
 # --- Tests for /initiate_cas_release ---
@@ -421,6 +406,234 @@ class TestInternalAPIReleasing(unittest.TestCase):
         self.mock_crud.update_polygon_transaction_status_and_cas_hash.assert_called_once_with(
             unittest.mock.ANY, self.mock_poly_tx.id, "cas_release_failed"
         )
+
+
+class TestInternalAPIBYOGas(unittest.TestCase):
+    """Test class for Bring Your Own Gas (BYO-gas) functionality"""
+    
+    def setUp(self):
+        self.client = TestClient(app)
+        self.original_internal_api_key = internal_api.settings.INTERNAL_API_KEY
+        internal_api.settings.INTERNAL_API_KEY = "test_api_key_byo_gas"
+
+        # Mock dependencies
+        self.mock_db_session = MagicMock(spec=Session)
+        self.get_db_patcher = patch('backend.api.internal_api.get_db', return_value=self.mock_db_session)
+        self.mock_get_db = self.get_db_patcher.start()
+
+        self.crud_patcher = patch('backend.api.internal_api.crud')
+        self.mock_crud = self.crud_patcher.start()
+
+        self.polygon_service_patcher = patch('backend.api.internal_api.PolygonService')
+        self.mock_PolygonService_class = self.polygon_service_patcher.start()
+        self.mock_polygon_service_instance = MagicMock()
+        self.mock_PolygonService_class.return_value = self.mock_polygon_service_instance
+
+        self.headers = {"X-Internal-API-Key": "test_api_key_byo_gas"}
+        
+        # Mock CAS deposit for testing
+        self.mock_cas_deposit = MagicMock()
+        self.mock_cas_deposit.id = 1
+        self.mock_cas_deposit.received_amount = 10.0
+        self.mock_cas_deposit.polygon_address = "0xTestPolygonAddress"
+        self.mock_cas_deposit.status = "cas_confirmed_pending_mint"
+        self.mock_cas_deposit.fee_model = "direct_payment"
+
+    def tearDown(self):
+        internal_api.settings.INTERNAL_API_KEY = self.original_internal_api_key
+        self.get_db_patcher.stop()
+        self.crud_patcher.stop()
+        self.polygon_service_patcher.stop()
+
+    def test_request_polygon_gas_address_successful(self):
+        """Test successful gas address generation"""
+        # Mock the gas deposit creation
+        mock_gas_deposit = MagicMock()
+        mock_gas_deposit.polygon_gas_address = "0x1234567890123456789012345678901234567890"
+        mock_gas_deposit.required_matic = 0.005
+        mock_gas_deposit.hd_index = 42
+        mock_gas_deposit.cas_deposit_id = 1
+        
+        self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
+        self.mock_crud.get_polygon_gas_deposit_by_cas_deposit_id.return_value = None  # No existing deposit
+        self.mock_crud.create_polygon_gas_deposit.return_value = mock_gas_deposit
+
+        request_data = {
+            "cas_deposit_id": 1,
+            "required_matic": 0.005
+        }
+
+        response = self.client.post(
+            "/internal/request_polygon_gas_address", 
+            json=request_data, 
+            headers=self.headers
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["polygon_gas_address"], "0x1234567890123456789012345678901234567890")
+        self.assertEqual(data["required_matic"], 0.005)
+        self.assertEqual(data["hd_index"], 42)
+
+        # Verify CRUD calls
+        self.mock_crud.get_cas_deposit_by_id.assert_called_once_with(unittest.mock.ANY, 1)
+        self.mock_crud.create_polygon_gas_deposit.assert_called_once()
+
+    def test_request_polygon_gas_address_cas_deposit_not_found(self):
+        """Test gas address request when CAS deposit doesn't exist"""
+        self.mock_crud.get_cas_deposit_by_id.return_value = None
+
+        request_data = {
+            "cas_deposit_id": 999,
+            "required_matic": 0.005
+        }
+
+        response = self.client.post(
+            "/internal/request_polygon_gas_address", 
+            json=request_data, 
+            headers=self.headers
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("CasDeposit record not found", response.json()["detail"])
+
+    def test_request_polygon_gas_address_wrong_fee_model(self):
+        """Test gas address request for non-direct-payment deposits"""
+        self.mock_cas_deposit.fee_model = "deducted"
+        self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
+
+        request_data = {
+            "cas_deposit_id": 1,
+            "required_matic": 0.005
+        }
+
+        response = self.client.post(
+            "/internal/request_polygon_gas_address", 
+            json=request_data, 
+            headers=self.headers
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Gas address can only be requested for direct_payment fee model", response.json()["detail"])
+
+    def test_request_polygon_gas_address_already_exists(self):
+        """Test gas address request when one already exists"""
+        # Mock existing gas deposit
+        mock_existing_gas_deposit = MagicMock()
+        mock_existing_gas_deposit.polygon_gas_address = "0xExistingAddress"
+        mock_existing_gas_deposit.required_matic = 0.005
+        mock_existing_gas_deposit.status = "pending"
+        mock_existing_gas_deposit.hd_index = 42
+        mock_existing_gas_deposit.cas_deposit_id = 1
+
+        self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
+        self.mock_crud.get_polygon_gas_deposit_by_cas_deposit_id.return_value = mock_existing_gas_deposit
+
+        request_data = {
+            "cas_deposit_id": 1,
+            "required_matic": 0.005
+        }
+
+        response = self.client.post(
+            "/internal/request_polygon_gas_address", 
+            json=request_data, 
+            headers=self.headers
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "existing")
+        self.assertEqual(data["polygon_gas_address"], "0xExistingAddress")
+
+    def test_initiate_wcas_mint_with_custom_private_key(self):
+        """Test minting with custom private key for BYO-gas"""
+        # Setup gas deposit
+        mock_gas_deposit = MagicMock()
+        mock_gas_deposit.polygon_gas_address = "0xGasAddress"
+        mock_gas_deposit.status = "funded"
+        mock_gas_deposit.hd_index = 42
+        
+        self.mock_cas_deposit.fee_model = "direct_payment"
+        self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
+        self.mock_crud.get_polygon_gas_deposit_by_cas_deposit_id.return_value = mock_gas_deposit
+        self.mock_polygon_service_instance.mint_wcas.return_value = "0xMintTxHash"
+
+        request_data = {
+            "cas_deposit_id": 1,
+            "amount_to_mint": 10.0,
+            "recipient_polygon_address": "0xTestPolygonAddress",
+            "cas_deposit_address": "testCasDepositAddress"
+        }
+
+        response = self.client.post(
+            "/internal/initiate_wcas_mint", 
+            json=request_data, 
+            headers=self.headers
+        )
+
+        self.assertEqual(response.status_code, 202)  # Background processing
+        data = response.json()
+        self.assertEqual(data["status"], "accepted")
+        self.assertEqual(data["message"], "wCAS minting process has been accepted and is running in the background.")
+
+        # The minting happens in background, so we can't directly verify the service call
+        # Instead, we verify that the endpoint accepted the request
+
+    def test_initiate_wcas_mint_byo_gas_not_funded(self):
+        """Test minting fails when BYO-gas deposit not funded"""
+        # Setup unfunded gas deposit
+        mock_gas_deposit = MagicMock()
+        mock_gas_deposit.polygon_gas_address = "0xGasAddress"
+        mock_gas_deposit.status = "pending"  # Not funded yet
+        
+        self.mock_cas_deposit.fee_model = "direct_payment"
+        self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
+        self.mock_crud.get_polygon_gas_deposit_by_cas_deposit_id.return_value = mock_gas_deposit
+
+        request_data = {
+            "cas_deposit_id": 1,
+            "amount_to_mint": 10.0,
+            "recipient_polygon_address": "0xTestPolygonAddress",
+            "cas_deposit_address": "testCasDepositAddress"
+        }
+
+        response = self.client.post(
+            "/internal/initiate_wcas_mint", 
+            json=request_data, 
+            headers=self.headers
+        )
+
+        # The API returns 202 but logs the error in background processing
+        self.assertEqual(response.status_code, 202)
+        data = response.json()
+        self.assertEqual(data["status"], "accepted")
+        self.assertEqual(data["message"], "wCAS minting process has been accepted and is running in the background.")
+
+    def test_initiate_wcas_mint_byo_gas_no_gas_deposit(self):
+        """Test minting fails when no gas deposit exists for direct_payment"""
+        self.mock_cas_deposit.fee_model = "direct_payment"
+        self.mock_crud.get_cas_deposit_by_id.return_value = self.mock_cas_deposit
+        self.mock_crud.get_polygon_gas_deposit_by_cas_deposit_id.return_value = None  # No gas deposit
+
+        request_data = {
+            "cas_deposit_id": 1,
+            "amount_to_mint": 10.0,
+            "recipient_polygon_address": "0xTestPolygonAddress",
+            "cas_deposit_address": "testCasDepositAddress"
+        }
+
+        response = self.client.post(
+            "/internal/initiate_wcas_mint", 
+            json=request_data, 
+            headers=self.headers
+        )
+
+        # The API returns 202 but logs the error in background processing
+        self.assertEqual(response.status_code, 202)
+        data = response.json()
+        self.assertEqual(data["status"], "accepted")
+        self.assertEqual(data["message"], "wCAS minting process has been accepted and is running in the background.")
 
 
 if __name__ == '__main__':

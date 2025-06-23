@@ -27,7 +27,7 @@ def create_user_with_polygon_address(db: Session, polygon_address: str) -> User:
     return db_user
 
 # CasDeposit CRUD
-def create_cas_deposit_record(db: Session, polygon_address: str) -> CasDeposit | None:
+def create_cas_deposit_record(db: Session, polygon_address: str, fee_model: str = "deducted") -> CasDeposit | None:
     # Generate a new Cascoin address using the CascoinService
     # We use the polygon_address as a label for the Cascoin address.
     # This can help in tracking which deposit address belongs to which Polygon user on the Cascoin node side.
@@ -48,7 +48,8 @@ def create_cas_deposit_record(db: Session, polygon_address: str) -> CasDeposit |
     db_deposit = CasDeposit(
         # user_id=user_id, # If linking to user table
         polygon_address=polygon_address,
-        cascoin_deposit_address=generated_cas_address
+        cascoin_deposit_address=generated_cas_address,
+        fee_model=fee_model
     )
     db.add(db_deposit)
     db.commit()
@@ -216,8 +217,8 @@ def get_next_hd_index(db: Session) -> int:
     # Find the highest index currently in use
     max_index_result = db.query(func.max(PolygonGasDeposit.hd_index)).scalar()
     if max_index_result is None:
-        from backend.config import settings
-        return settings.HD_INDEX_START
+        # Start from index 0 if no previous deposits exist
+        return 0
     return max_index_result + 1
 
 def derive_polygon_gas_address(hd_index: int) -> tuple[str, str]:
@@ -230,13 +231,16 @@ def derive_polygon_gas_address(hd_index: int) -> tuple[str, str]:
     if settings.HD_MNEMONIC == "YOUR_HD_MNEMONIC_HERE_MUST_BE_SET_IN_ENV":
         raise ValueError("HD_MNEMONIC not configured. Set HD_MNEMONIC environment variable.")
     
+    # Enable HD wallet features (they are disabled by default)
+    Account.enable_unaudited_hdwallet_features()
+    
     # Derive account using BIP-44 path for Ethereum: m/44'/60'/0'/0/{index}
     account = Account.from_mnemonic(
         settings.HD_MNEMONIC, 
         account_path=f"m/44'/60'/0'/0/{hd_index}"
     )
     
-    return account.address, account.key.hex()
+    return account.address, "0x" + account.key.hex()
 
 def create_polygon_gas_deposit(
     db: Session, 
@@ -269,7 +273,8 @@ def create_polygon_gas_deposit(
         return gas_deposit
         
     except Exception as e:
-        logger.error(f"Error creating polygon gas deposit: {e}", exc_info=True)
+        import logging
+        logging.getLogger(__name__).error(f"Error creating polygon gas deposit: {e}", exc_info=True)
         db.rollback()
         return None
 
@@ -284,6 +289,11 @@ def get_polygon_gas_deposit_by_cas_deposit_id(db: Session, cas_deposit_id: int) 
     return db.query(PolygonGasDeposit).filter(
         PolygonGasDeposit.cas_deposit_id == cas_deposit_id
     ).first()
+
+# Alias for compatibility with tests
+def get_polygon_gas_deposit_by_cas_id(db: Session, cas_deposit_id: int) -> Optional[PolygonGasDeposit]:
+    """Alias for get_polygon_gas_deposit_by_cas_deposit_id for test compatibility."""
+    return get_polygon_gas_deposit_by_cas_deposit_id(db, cas_deposit_id)
 
 def update_polygon_gas_deposit_status(
     db: Session, 
@@ -311,6 +321,53 @@ def get_pending_polygon_gas_deposits(db: Session) -> list[PolygonGasDeposit]:
     return db.query(PolygonGasDeposit).filter(
         PolygonGasDeposit.status == "pending"
     ).all()
+
+def get_polygon_gas_deposit_by_id(db: Session, gas_deposit_id: int) -> Optional[PolygonGasDeposit]:
+    """Get a polygon gas deposit by its ID."""
+    return db.query(PolygonGasDeposit).filter(
+        PolygonGasDeposit.id == gas_deposit_id
+    ).first()
+
+def get_funded_polygon_gas_deposits(db: Session) -> list[PolygonGasDeposit]:
+    """Get all polygon gas deposits that are funded and ready for use."""
+    return db.query(PolygonGasDeposit).filter(
+        PolygonGasDeposit.status == "funded"
+    ).all()
+
+def update_polygon_gas_deposit_received_matic(
+    db: Session,
+    gas_deposit_id: int,
+    received_matic: float
+) -> Optional[PolygonGasDeposit]:
+    """Update the received MATIC amount for a polygon gas deposit."""
+    gas_deposit = db.query(PolygonGasDeposit).filter(
+        PolygonGasDeposit.id == gas_deposit_id
+    ).first()
+    
+    if gas_deposit:
+        gas_deposit.received_matic = received_matic
+        # Auto-update status to funded if received amount meets requirement
+        if received_matic >= gas_deposit.required_matic:
+            gas_deposit.status = "funded"
+        gas_deposit.updated_at = func.now()
+        db.commit()
+        db.refresh(gas_deposit)
+        return gas_deposit
+    return None
+
+def generate_hd_address(index: Optional[int] = None) -> tuple[str, str, int]:
+    """
+    Generate a new HD wallet address for gas deposits.
+    This is an alias for the polygon service function for compatibility.
+    
+    Args:
+        index: Optional specific index to use, otherwise finds next available
+        
+    Returns:
+        tuple: (address, private_key, hd_index)
+    """
+    from backend.services.polygon_service import generate_hd_address as service_generate_hd_address
+    return service_generate_hd_address(index)
 
 def get_private_key_for_gas_deposit(gas_deposit: PolygonGasDeposit) -> str:
     """Re-derive the private key for a gas deposit address."""

@@ -11,3 +11,5 @@ pytest
 httpx
 websockets
 websocket-client
+mnemonic >=0.20
+hdwallet >=2.2.1

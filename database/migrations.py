@@ -183,6 +183,9 @@ def run_all_migrations(db: Session):
         # Run polygon gas deposits migration (BYO-gas flow)
         run_polygon_gas_deposits_migration(db)
         
+        # Run fee model migration (add fee_model column to cas_deposits)
+        run_fee_model_migration(db)
+        
         # Add future migrations here:
         # run_future_migration_1(db)
         # run_future_migration_2(db)
@@ -363,6 +366,40 @@ def run_polygon_gas_deposits_migration(db: Session):
         db.rollback()
         # Don't re-raise to avoid breaking initialization
         # The table might be created by SQLAlchemy models instead
+
+def run_fee_model_migration(db: Session):
+    """
+    Add fee_model column to cas_deposits table for BYO-gas functionality
+    """
+    logger.info("=== Starting fee_model migration ===")
+    
+    try:
+        # Check if column already exists
+        if column_exists(db, "cas_deposits", "fee_model"):
+            logger.info("✅ fee_model column already exists, skipping migration")
+            return
+        
+        logger.info("Adding fee_model column to cas_deposits table...")
+        
+        # Add the fee_model column with default value
+        add_column_if_not_exists(
+            db, 
+            "cas_deposits", 
+            "fee_model", 
+            "VARCHAR(50) DEFAULT 'deducted' NOT NULL"
+        )
+        
+        # Update existing records to have the default value
+        update_existing_records(db, "cas_deposits", "fee_model", "deducted")
+        
+        db.commit()
+        logger.info("🎉 fee_model migration completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"❌ fee_model migration failed: {e}")
+        logger.error("Full error details:", exc_info=True)
+        db.rollback()
+        # Don't re-raise to avoid breaking initialization
 
 if __name__ == "__main__":
     # This allows the migration to be run standalone for testing

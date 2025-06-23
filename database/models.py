@@ -23,6 +23,7 @@ class CasDeposit(Base):
     cascoin_deposit_address = Column(String, unique=True, index=True, nullable=False)
     received_amount = Column(Float, nullable=True)
     status = Column(String, default="pending", index=True)
+    fee_model = Column(String, default="deducted")  # Fee model: 'direct_payment' or 'deducted'
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     # Added fields for confirmation tracking

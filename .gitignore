@@ -9,3 +9,8 @@ __pycache__
 .ruff_cache
 .ruff_cache
 logs/
+
+# Test database files
+test_*.db
+test_crud_*.db
+test_migration_*.db

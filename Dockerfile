@@ -3,7 +3,13 @@ FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies including GCC for compiling native extensions
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --upgrade pip
 
 # Copy requirements and install as wheels

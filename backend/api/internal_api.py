@@ -39,12 +39,30 @@ def mint_wcas_in_background(deposit_id: int, recipient_address: str, amount: flo
     try:
         logger.info(f"{logger_prefix}Starting background minting process.")
         
-        # Check if this is a BYO-gas flow (has associated gas deposit)
-        gas_deposit = crud.get_polygon_gas_deposit_by_cas_deposit_id(db_session, deposit_id)
+        # Get the CAS deposit to check fee model
+        cas_deposit = crud.get_cas_deposit_by_id(db_session, deposit_id)
+        if not cas_deposit:
+            logger.error(f"{logger_prefix}CAS deposit not found")
+            return
+        
+        # Check if this is a BYO-gas flow (direct_payment fee model)
         gas_payer_private_key = None
         
-        if gas_deposit and gas_deposit.status == "funded":
-            # BYO-gas flow: use the gas deposit's private key
+        if cas_deposit.fee_model == "direct_payment":
+            # BYO-gas flow: check for gas deposit
+            gas_deposit = crud.get_polygon_gas_deposit_by_cas_deposit_id(db_session, deposit_id)
+            
+            if not gas_deposit:
+                logger.error(f"{logger_prefix}BYO-gas flow requires gas deposit, but none found")
+                crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)
+                return
+            
+            if gas_deposit.status != "funded":
+                logger.error(f"{logger_prefix}Gas deposit not funded. Status: {gas_deposit.status}")
+                crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)
+                return
+            
+            # Use the gas deposit's private key
             try:
                 gas_payer_private_key = crud.get_private_key_for_gas_deposit(gas_deposit)
                 logger.info(f"{logger_prefix}Using BYO-gas flow with gas deposit ID {gas_deposit.id}")
@@ -68,7 +86,7 @@ def mint_wcas_in_background(deposit_id: int, recipient_address: str, amount: flo
         mint_tx_hash = polygon_service.mint_wcas(
             recipient_address=recipient_address,
             amount_cas=amount,
-            gas_payer_private_key=gas_payer_private_key
+            custom_private_key=gas_payer_private_key
         )
 
         # 3. Update DB based on result
@@ -88,13 +106,15 @@ def mint_wcas_in_background(deposit_id: int, recipient_address: str, amount: flo
             )
             
             # Mark gas deposit as spent if this was BYO-gas flow
-            if gas_deposit:
-                crud.update_polygon_gas_deposit_status(
-                    db_session, 
-                    gas_deposit.id, 
-                    "spent"
-                )
-                logger.info(f"{logger_prefix}Marked gas deposit {gas_deposit.id} as spent")
+            if cas_deposit.fee_model == "direct_payment":
+                gas_deposit = crud.get_polygon_gas_deposit_by_cas_deposit_id(db_session, deposit_id)
+                if gas_deposit:
+                    crud.update_polygon_gas_deposit_status(
+                        db_session, 
+                        gas_deposit.id, 
+                        "spent"
+                    )
+                    logger.info(f"{logger_prefix}Marked gas deposit {gas_deposit.id} as spent")
         else:
             logger.error(f"{logger_prefix}PolygonService.mint_wcas did not return a transaction hash or failed.")
             crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)
@@ -275,6 +295,75 @@ async def initiate_cas_release(
         logger.error(f"{logger_prefix}Unexpected error during CAS release: {e}", exc_info=True)
         crud.update_polygon_transaction_status_and_cas_hash(db, poly_tx.id, "cas_release_failed")
         raise HTTPException(status_code=500, detail=f"{logger_prefix}An unexpected error occurred: {str(e)}")
+
+
+# --- BYO-Gas Endpoints ---
+
+@router.post("/request_polygon_gas_address", response_model=schemas.PolygonGasDepositResponse)
+def request_polygon_gas_address(
+    request: schemas.PolygonGasDepositRequest, 
+    db: Session = Depends(get_db),
+    api_key_verified: bool = Depends(verify_api_key)
+):
+    """
+    Internal endpoint to create a polygon gas deposit address for BYO-gas flow.
+    Called when a CAS deposit with direct_payment fee model is detected.
+    """
+    logger_prefix = f"Gas Address Request for CAS Deposit {request.cas_deposit_id}: "
+    logger.info(f"{logger_prefix}Received request: {request.model_dump_json(indent=2)}")
+    
+    # Validate the CAS deposit exists
+    cas_deposit = crud.get_cas_deposit_by_id(db, request.cas_deposit_id)
+    if not cas_deposit:
+        logger.error(f"{logger_prefix}CAS deposit not found")
+        raise HTTPException(status_code=404, detail="CasDeposit record not found")
+    
+    # Validate that this CAS deposit uses direct payment fee model
+    if cas_deposit.fee_model != "direct_payment":
+        logger.error(f"{logger_prefix}Wrong fee model: {cas_deposit.fee_model}")
+        raise HTTPException(status_code=400, detail="Gas address can only be requested for direct_payment fee model")
+    
+    # Check if gas deposit already exists for this CAS deposit
+    existing_gas_deposit = crud.get_polygon_gas_deposit_by_cas_deposit_id(db, request.cas_deposit_id)
+    if existing_gas_deposit:
+        logger.info(f"{logger_prefix}Returning existing gas deposit: {existing_gas_deposit.polygon_gas_address}")
+        return schemas.PolygonGasDepositResponse(
+            status="existing",
+            polygon_gas_address=existing_gas_deposit.polygon_gas_address,
+            required_matic=existing_gas_deposit.required_matic,
+            hd_index=existing_gas_deposit.hd_index,
+            cas_deposit_id=existing_gas_deposit.cas_deposit_id
+        )
+    
+    # Validate MATIC amount
+    if request.required_matic <= 0:
+        logger.error(f"{logger_prefix}Invalid MATIC amount: {request.required_matic}")
+        raise HTTPException(status_code=400, detail="MATIC amount must be positive")
+    
+    # Create new gas deposit record
+    try:
+        gas_deposit = crud.create_polygon_gas_deposit(
+            db=db,
+            cas_deposit_id=request.cas_deposit_id,
+            matic_required=request.required_matic
+        )
+        
+        if not gas_deposit:
+            logger.error(f"{logger_prefix}Failed to create gas deposit")
+            raise HTTPException(status_code=500, detail="Could not create polygon gas deposit address")
+        
+        logger.info(f"{logger_prefix}Created new gas deposit: {gas_deposit.polygon_gas_address}")
+        return schemas.PolygonGasDepositResponse(
+            status="success",
+            polygon_gas_address=gas_deposit.polygon_gas_address,
+            required_matic=gas_deposit.required_matic,
+            hd_index=gas_deposit.hd_index,
+            cas_deposit_id=gas_deposit.cas_deposit_id
+        )
+        
+    except Exception as e:
+        logger.error(f"{logger_prefix}Error creating gas deposit: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create gas deposit: {str(e)}")
 
 
 # --- Notification Endpoints for Websocket Updates ---

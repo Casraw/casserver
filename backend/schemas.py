@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from decimal import Decimal
 import datetime
 
 # User Schemas
@@ -73,6 +74,7 @@ class CASReleaseResponse(BaseModel):
 # CasDeposit Schemas
 class CasDepositRequest(BaseModel): # Renamed from CasDepositBase for clarity
     polygon_address: str = Field(..., description="User's Polygon address where wCAS will be minted.")
+    fee_model: str = Field(default="deducted", description="Fee model: 'direct_payment' or 'deducted'")
 
 # CasDepositCreate is more for internal use if fields differ from request
 # class CasDepositCreate(CasDepositBase):
@@ -102,12 +104,33 @@ class WCASDepositResponse(BaseModel):
 # For Polygon Gas Deposits (BYO-gas flow)
 class PolygonGasDepositRequest(BaseModel):
     cas_deposit_id: int = Field(..., description="ID of the CAS deposit this gas payment is for")
-    matic_required: float = Field(..., description="Amount of MATIC required for gas fees")
+    required_matic: float = Field(..., description="Amount of MATIC required for gas fees")
 
 class PolygonGasDepositResponse(BaseModel):
-    id: int
-    cas_deposit_id: int
+    status: str = Field(..., description="Status of the request: 'success', 'existing', or 'error'")
     polygon_gas_address: str = Field(..., description="Polygon address where user should send MATIC for gas")
-    matic_required: float = Field(..., description="Amount of MATIC required")
-    status: str
-    created_at: datetime
+    required_matic: float = Field(..., description="Amount of MATIC required")
+    hd_index: int = Field(..., description="HD wallet derivation index for this address")
+    cas_deposit_id: int = Field(..., description="Associated CAS deposit ID")
+
+class PolygonGasAddressRequest(BaseModel):
+    cas_deposit_id: int = Field(..., description="ID of the CAS deposit this gas payment is for")
+    required_matic: float = Field(..., description="Amount of MATIC required for gas fees")
+
+class PolygonGasAddressResponse(BaseModel):
+    status: str = Field(..., description="Status of the request: 'success', 'existing', or 'error'")
+    polygon_gas_address: str = Field(..., description="Polygon address where user should send MATIC for gas")
+    required_matic: float = Field(..., description="Amount of MATIC required")
+    hd_index: int = Field(..., description="HD wallet derivation index for this address")
+    cas_deposit_id: int = Field(..., description="Associated CAS deposit ID")
+
+# For CRUD operations
+class PolygonGasDepositCreate(BaseModel):
+    cas_deposit_id: int
+    polygon_gas_address: Optional[str] = None  # Will be generated if not provided
+    required_matic: Decimal
+    hd_index: Optional[int] = None  # Will be generated if not provided
+
+class PolygonGasDepositUpdate(BaseModel):
+    status: Optional[str] = None
+    received_matic: Optional[Decimal] = None
