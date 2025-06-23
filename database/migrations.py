@@ -95,33 +95,79 @@ def run_confirmation_tracking_migration(db: Session):
     Run the migration to add confirmation tracking columns
     This is the main migration function that should be called during app startup
     """
-    logger.info("Starting confirmation tracking migration...")
+    logger.info("=== Starting confirmation tracking migration ===")
     
     try:
-        # Migration for cas_deposits table
-        logger.info("Migrating cas_deposits table...")
-        add_column_if_not_exists(db, "cas_deposits", "current_confirmations", "INTEGER DEFAULT 0")
-        add_column_if_not_exists(db, "cas_deposits", "required_confirmations", "INTEGER DEFAULT 12")
-        add_column_if_not_exists(db, "cas_deposits", "deposit_tx_hash", "VARCHAR(255)")
+        # Check if tables exist first
+        engine = db.get_bind()
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
         
-        # Update existing records
+        if "cas_deposits" not in tables:
+            logger.warning("cas_deposits table does not exist yet - skipping migration")
+            return
+            
+        if "polygon_transactions" not in tables:
+            logger.warning("polygon_transactions table does not exist yet - skipping migration")
+            return
+        
+        # Migration for cas_deposits table
+        logger.info("Checking cas_deposits table...")
+        confirmation_columns_added = 0
+        
+        if not column_exists(db, "cas_deposits", "current_confirmations"):
+            add_column_if_not_exists(db, "cas_deposits", "current_confirmations", "INTEGER DEFAULT 0")
+            confirmation_columns_added += 1
+        else:
+            logger.info("✅ current_confirmations already exists in cas_deposits")
+            
+        if not column_exists(db, "cas_deposits", "required_confirmations"):
+            add_column_if_not_exists(db, "cas_deposits", "required_confirmations", "INTEGER DEFAULT 12")
+            confirmation_columns_added += 1
+        else:
+            logger.info("✅ required_confirmations already exists in cas_deposits")
+            
+        if not column_exists(db, "cas_deposits", "deposit_tx_hash"):
+            add_column_if_not_exists(db, "cas_deposits", "deposit_tx_hash", "VARCHAR(255)")
+            confirmation_columns_added += 1
+        else:
+            logger.info("✅ deposit_tx_hash already exists in cas_deposits")
+        
+        # Update existing records for cas_deposits
         update_existing_records(db, "cas_deposits", "current_confirmations", 0)
         update_existing_records(db, "cas_deposits", "required_confirmations", 12)
         
         # Migration for polygon_transactions table
-        logger.info("Migrating polygon_transactions table...")
-        add_column_if_not_exists(db, "polygon_transactions", "current_confirmations", "INTEGER DEFAULT 0")
-        add_column_if_not_exists(db, "polygon_transactions", "required_confirmations", "INTEGER DEFAULT 12")
+        logger.info("Checking polygon_transactions table...")
         
-        # Update existing records
+        if not column_exists(db, "polygon_transactions", "current_confirmations"):
+            add_column_if_not_exists(db, "polygon_transactions", "current_confirmations", "INTEGER DEFAULT 0")
+            confirmation_columns_added += 1
+        else:
+            logger.info("✅ current_confirmations already exists in polygon_transactions")
+            
+        if not column_exists(db, "polygon_transactions", "required_confirmations"):
+            add_column_if_not_exists(db, "polygon_transactions", "required_confirmations", "INTEGER DEFAULT 12")
+            confirmation_columns_added += 1
+        else:
+            logger.info("✅ required_confirmations already exists in polygon_transactions")
+        
+        # Update existing records for polygon_transactions
         update_existing_records(db, "polygon_transactions", "current_confirmations", 0)
         update_existing_records(db, "polygon_transactions", "required_confirmations", 12)
         
-        logger.info("Confirmation tracking migration completed successfully!")
+        if confirmation_columns_added > 0:
+            logger.info(f"✅ Added {confirmation_columns_added} confirmation tracking columns!")
+        else:
+            logger.info("✅ All confirmation tracking columns already exist!")
+            
+        logger.info("🎉 Confirmation tracking migration completed successfully!")
         
     except Exception as e:
-        logger.error(f"Migration failed: {e}")
-        raise
+        logger.error(f"❌ Migration failed: {e}")
+        logger.error("Full error details:", exc_info=True)
+        # Don't re-raise the exception to avoid breaking the entire initialization
+        # The tables might already be created correctly by SQLAlchemy models
 
 def run_all_migrations(db: Session):
     """

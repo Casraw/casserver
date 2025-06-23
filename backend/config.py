@@ -38,9 +38,24 @@ class Settings(BaseSettings):
     # It MUST be set to a strong, unique secret in a production environment via ENV.
     INTERNAL_API_KEY: str = os.getenv("INTERNAL_API_KEY", "bridge_internal_secret_key_change_me_!!!")
 
+    # --- Operational Settings (for watchers and services) ---
+    POLL_INTERVAL_SECONDS: int = int(os.getenv("POLL_INTERVAL_SECONDS", "10"))
+    CONFIRMATIONS_REQUIRED: int = int(os.getenv("CONFIRMATIONS_REQUIRED", "12"))
+    
+    # --- Fee System Configuration ---
+    DIRECT_PAYMENT_FEE_PERCENTAGE: float = float(os.getenv("DIRECT_PAYMENT_FEE_PERCENTAGE", "0.1"))
+    DEDUCTED_FEE_PERCENTAGE: float = float(os.getenv("DEDUCTED_FEE_PERCENTAGE", "2.5"))
+    MINIMUM_BRIDGE_AMOUNT: float = float(os.getenv("MINIMUM_BRIDGE_AMOUNT", "1.0"))
+    MATIC_TO_CAS_EXCHANGE_RATE: float = float(os.getenv("MATIC_TO_CAS_EXCHANGE_RATE", "100.0"))
+    MATIC_TO_WCAS_EXCHANGE_RATE: float = float(os.getenv("MATIC_TO_WCAS_EXCHANGE_RATE", "100.0"))
+    GAS_PRICE_GWEI: float = float(os.getenv("GAS_PRICE_GWEI", "30.0"))
+    GAS_PRICE_BUFFER_PERCENTAGE: float = float(os.getenv("GAS_PRICE_BUFFER_PERCENTAGE", "20.0"))
+    TOKEN_CONVERSION_FEE_PERCENTAGE: float = float(os.getenv("TOKEN_CONVERSION_FEE_PERCENTAGE", "0.5"))
+
     class Config:
         env_file = ".env"
         env_file_encoding = 'utf-8'
+        extra = "ignore"  # Allow extra environment variables in production
 
 settings = Settings()
 

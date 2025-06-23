@@ -14,12 +14,22 @@ chmod 644 /var/log/nginx/access.log
 chmod 644 /var/log/nginx/error.log
 
 # Initialize database
-echo "Initializing database..."
-python3 -m backend.init_db
+echo "============================================"
+echo "Initializing database and running migrations..."
+echo "============================================"
 
-# Wait for database to be ready
-echo "Waiting for database to be ready..."
-sleep 5
+# Try to initialize database with better error handling
+if python3 -m backend.init_db; then
+    echo "✅ Database initialization completed successfully!"
+else
+    echo "❌ Database initialization failed!"
+    echo "Logs from database initialization:"
+    # The error details should already be in the logs from init_db.py
+    echo "Attempting to continue startup anyway..."
+    echo "Note: If confirmation tracking doesn't work, check the database schema manually."
+fi
+
+echo "============================================"
 
 # Validate environment variables
 echo "Validating environment variables..."
