@@ -22,9 +22,16 @@ class Settings(BaseSettings):
     POLYGON_RPC_URL: str = os.getenv("POLYGON_RPC_URL", "https_rpc_mumbai_maticvigil_com") # Example Mumbai RPC
 
     # IMPORTANT: This is a highly sensitive private key for the account that mints wCAS tokens.
-    # It MUST be set via an environment variable and kept secret.
-    # DO NOT commit the actual private key to version control.
+    # It must have the 'minter' role on the wCAS contract deployed on Polygon.
+    # In production, this should be loaded from a secure vault or environment variable.
     MINTER_PRIVATE_KEY: str = os.getenv("MINTER_PRIVATE_KEY", "YOUR_MINTER_PRIVATE_KEY_HERE_MUST_BE_SET_IN_ENV")
+
+    # HD Wallet configuration for generating polygon gas addresses
+    # This mnemonic is used to derive child addresses for users to send MATIC to
+    HD_MNEMONIC: str = os.getenv("HD_MNEMONIC", "YOUR_HD_MNEMONIC_HERE_MUST_BE_SET_IN_ENV")
+
+    # Current HD index counter (stored in DB, but this is fallback)
+    HD_INDEX_START: int = int(os.getenv("HD_INDEX_START", "0"))
 
     WCAS_CONTRACT_ADDRESS: str = os.getenv("WCAS_CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000") # Placeholder
     WCAS_CONTRACT_ABI_JSON_PATH: str = os.getenv("WCAS_CONTRACT_ABI_JSON_PATH", "smart_contracts/wCAS_ABI.json") # Path to the wCAS ABI JSON file

@@ -25,6 +25,54 @@ def request_cascoin_deposit_address(
         created_at=deposit_record.created_at
     )
 
+@router.post("/request_polygon_gas_address", response_model=schemas.PolygonGasDepositResponse)
+def request_polygon_gas_address(
+    request: schemas.PolygonGasDepositRequest, db: Session = Depends(get_db)
+):
+    """
+    Create a polygon gas deposit address for BYO-gas flow.
+    User sends MATIC to this address to pay for minting gas fees.
+    """
+    # Validate the CAS deposit exists
+    cas_deposit = crud.get_cas_deposit_by_id(db, request.cas_deposit_id)
+    if not cas_deposit:
+        raise HTTPException(status_code=404, detail="CAS deposit not found.")
+    
+    # Check if gas deposit already exists for this CAS deposit
+    existing_gas_deposit = crud.get_polygon_gas_deposit_by_cas_deposit_id(db, request.cas_deposit_id)
+    if existing_gas_deposit:
+        return schemas.PolygonGasDepositResponse(
+            id=existing_gas_deposit.id,
+            cas_deposit_id=existing_gas_deposit.cas_deposit_id,
+            polygon_gas_address=existing_gas_deposit.polygon_gas_address,
+            matic_required=existing_gas_deposit.required_matic,
+            status=existing_gas_deposit.status,
+            created_at=existing_gas_deposit.created_at
+        )
+    
+    # Validate MATIC amount
+    if request.matic_required <= 0:
+        raise HTTPException(status_code=400, detail="MATIC amount must be positive.")
+    
+    # Create new gas deposit record
+    gas_deposit = crud.create_polygon_gas_deposit(
+        db=db,
+        cas_deposit_id=request.cas_deposit_id,
+        matic_required=request.matic_required
+    )
+    
+    if not gas_deposit:
+        raise HTTPException(status_code=500, detail="Could not create polygon gas deposit address.")
+    
+    return schemas.PolygonGasDepositResponse(
+        id=gas_deposit.id,
+        cas_deposit_id=gas_deposit.cas_deposit_id,
+        polygon_gas_address=gas_deposit.polygon_gas_address,
+        matic_required=gas_deposit.required_matic,
+        status=gas_deposit.status,
+        created_at=gas_deposit.created_at
+    )
+
 @router.post("/request_wcas_deposit_address", response_model=schemas.WCASDepositResponse)
 def request_wcas_deposit_address(
     request: schemas.WCASDepositRequest, db: Session = Depends(get_db) # db might be used to log the request

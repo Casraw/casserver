@@ -388,26 +388,132 @@ def check_polygon_events():
 
 
 def main_loop():
-    logger.info("Polygon Watcher started.")
+    """Main loop that continuously monitors for new wCAS deposits."""
     if not setup_web3_and_contract():
-        logger.error("Initial Web3/Contract setup failed. Polygon Watcher may not function correctly. Will retry periodically.")
+        logger.error("Failed to initialize Web3 and contract. Exiting.")
+        return
 
-    logger.info(f"Watching for wCAS transfers to: {BRIDGE_WCAS_COLLECTION_ADDRESS} on contract {WCAS_CONTRACT_ADDRESS}")
-    logger.info(f"Polling every {POLL_INTERVAL_SECONDS}s, Polygon Confirmations Required: {POLYGON_CONFIRMATIONS_REQUIRED}")
-
+    logger.info("Starting Polygon watcher main loop...")
     while True:
         try:
+            # Check for gas deposits funding
+            check_gas_deposits_funding()
+            
+            # Check for new Polygon events
             check_polygon_events()
+            
+            # Check for confirmation updates
+            check_confirmation_updates()
+            
+            logger.info(f"Sleeping for {POLL_INTERVAL_SECONDS} seconds...")
+            time.sleep(POLL_INTERVAL_SECONDS)
+        except KeyboardInterrupt:
+            logger.info("Polygon watcher stopped by user.")
+            break
         except Exception as e:
-            logger.error(f"Unhandled error in main Polygon watcher loop: {e}", exc_info=True)
-            # Consider a backoff or attempt to re-initialize Web3 connection if it fails repeatedly
-            if "connection" in str(e).lower() or "node" in str(e).lower():
-                logger.info("Attempting to re-initialize Web3 connection and contract due to error...")
-                time.sleep(POLL_INTERVAL_SECONDS) # Wait before retrying connection
-                setup_web3_and_contract()
+            logger.error(f"Error in main loop: {e}", exc_info=True)
+            logger.info(f"Continuing after error. Sleeping for {POLL_INTERVAL_SECONDS} seconds...")
+            time.sleep(POLL_INTERVAL_SECONDS)
 
-        logger.info(f"Polygon watcher sleeping for {POLL_INTERVAL_SECONDS} seconds...")
-        time.sleep(POLL_INTERVAL_SECONDS)
+def check_gas_deposits_funding():
+    """Check for MATIC funding of gas deposit addresses."""
+    from backend.crud import get_pending_polygon_gas_deposits, update_polygon_gas_deposit_status
+    
+    db = SessionLocal()
+    try:
+        pending_deposits = get_pending_polygon_gas_deposits(db)
+        
+        if not pending_deposits:
+            return
+            
+        logger.info(f"Checking {len(pending_deposits)} pending gas deposits for funding...")
+        
+        for gas_deposit in pending_deposits:
+            try:
+                # Check balance of the gas deposit address
+                balance_wei = w3.eth.get_balance(gas_deposit.polygon_gas_address)
+                balance_matic = Web3.from_wei(balance_wei, 'ether')
+                
+                logger.info(f"Gas deposit {gas_deposit.id} (addr: {gas_deposit.polygon_gas_address}): "
+                           f"Balance: {balance_matic} MATIC, Required: {gas_deposit.required_matic} MATIC")
+                
+                if float(balance_matic) >= gas_deposit.required_matic:
+                    # Mark as funded
+                    update_polygon_gas_deposit_status(
+                        db, 
+                        gas_deposit.id, 
+                        "funded",
+                        received_matic=float(balance_matic)
+                    )
+                    logger.info(f"Gas deposit {gas_deposit.id} is now funded! "
+                               f"Received {balance_matic} MATIC (required: {gas_deposit.required_matic})")
+                    
+                    # Trigger minting for the associated CAS deposit
+                    trigger_minting_after_gas_funding(gas_deposit.cas_deposit_id, db)
+                    
+            except Exception as e:
+                logger.error(f"Error checking gas deposit {gas_deposit.id}: {e}")
+                continue
+                
+    except Exception as e:
+        logger.error(f"Error in check_gas_deposits_funding: {e}", exc_info=True)
+    finally:
+        db.close()
+
+def trigger_minting_after_gas_funding(cas_deposit_id: int, db):
+    """Trigger minting after gas deposit is funded."""
+    from backend.crud import get_cas_deposit_by_id, update_cas_deposit_status_and_mint_hash
+    
+    try:
+        cas_deposit = get_cas_deposit_by_id(db, cas_deposit_id)
+        if not cas_deposit:
+            logger.error(f"CAS deposit {cas_deposit_id} not found")
+            return
+            
+        if cas_deposit.status == "cas_confirmed_awaiting_gas":
+            logger.info(f"Gas funding detected for CAS deposit {cas_deposit_id}, triggering minting...")
+            
+            # Update status to trigger minting
+            update_cas_deposit_status_and_mint_hash(
+                db, 
+                cas_deposit_id, 
+                "cas_confirmed_pending_mint"
+            )
+            
+            # Call the minting API endpoint
+            mint_payload = {
+                "cas_deposit_id": cas_deposit_id,
+                "amount_to_mint": cas_deposit.received_amount,
+                "recipient_polygon_address": cas_deposit.polygon_address,
+                "cas_deposit_address": cas_deposit.cascoin_deposit_address
+            }
+            
+            headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
+            api_endpoint = f"{BRIDGE_API_URL}/initiate_wcas_mint"
+            
+            try:
+                response = requests.post(api_endpoint, json=mint_payload, headers=headers, timeout=15)
+                response.raise_for_status()
+                mint_triggered = True
+                logger.info(f"Successfully called minting API for CAS deposit {cas_deposit_id}")
+            except Exception as api_error:
+                logger.error(f"Failed to call minting API: {api_error}")
+                mint_triggered = False
+            
+            if mint_triggered:
+                logger.info(f"Successfully triggered minting for CAS deposit {cas_deposit_id}")
+            else:
+                logger.error(f"Failed to trigger minting for CAS deposit {cas_deposit_id}")
+                update_cas_deposit_status_and_mint_hash(
+                    db, 
+                    cas_deposit_id, 
+                    "mint_trigger_failed"
+                )
+        else:
+            logger.info(f"CAS deposit {cas_deposit_id} status is {cas_deposit.status}, not triggering minting")
+            
+    except Exception as e:
+        logger.error(f"Error triggering minting after gas funding: {e}", exc_info=True)
 
 if __name__ == "__main__":
     # Ensure DB tables exist - Critical for polygon watcher to work

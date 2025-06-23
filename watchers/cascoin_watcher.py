@@ -228,20 +228,40 @@ def check_confirmation_updates():
                     session.commit()
                     _send_deposit_update_notification(deposit_record.id)
 
-                    if deposit_record.received_amount and deposit_record.received_amount > 0:
-                        mint_triggered = trigger_wcas_minting(
-                            deposit_id=deposit_record.id,
-                            amount_to_mint=deposit_record.received_amount,
-                            recipient_polygon_address=deposit_record.polygon_address,
-                            cas_deposit_address=deposit_record.cascoin_deposit_address
-                        )
-                        
-                        if mint_triggered:
-                            deposit_record.status = "mint_triggered"
-                            logger.info(f"wCAS minting triggered for deposit ID {deposit_record.id}")
+                    # Check if this deposit has a gas deposit requirement (BYO-gas flow)
+                    # Import here to avoid circular imports
+                    from backend.crud import get_polygon_gas_deposit_by_cas_deposit_id
+                    gas_deposit = get_polygon_gas_deposit_by_cas_deposit_id(session, deposit_record.id)
+                    
+                    if gas_deposit:
+                        if gas_deposit.status == "funded":
+                            logger.info(f"Deposit ID {deposit_record.id}: Gas deposit is funded, proceeding with minting")
+                            should_trigger_mint = True
                         else:
-                            deposit_record.status = "mint_trigger_failed"
-                            logger.error(f"Failed to trigger minting for deposit ID {deposit_record.id}")
+                            logger.info(f"Deposit ID {deposit_record.id}: Waiting for gas deposit funding (status: {gas_deposit.status})")
+                            should_trigger_mint = False
+                    else:
+                        logger.info(f"Deposit ID {deposit_record.id}: No gas deposit found, using traditional flow")
+                        should_trigger_mint = True
+
+                    if deposit_record.received_amount and deposit_record.received_amount > 0:
+                        if should_trigger_mint:
+                            mint_triggered = trigger_wcas_minting(
+                                deposit_id=deposit_record.id,
+                                amount_to_mint=deposit_record.received_amount,
+                                recipient_polygon_address=deposit_record.polygon_address,
+                                cas_deposit_address=deposit_record.cascoin_deposit_address
+                            )
+                            
+                            if mint_triggered:
+                                deposit_record.status = "mint_triggered"
+                                logger.info(f"wCAS minting triggered for deposit ID {deposit_record.id}")
+                            else:
+                                deposit_record.status = "mint_trigger_failed"
+                                logger.error(f"Failed to trigger minting for deposit ID {deposit_record.id}")
+                        else:
+                            deposit_record.status = "cas_confirmed_awaiting_gas"
+                            logger.info(f"Deposit ID {deposit_record.id}: CAS confirmed, waiting for gas funding")
                         
                         deposit_record.updated_at = func.now()
                         session.commit()

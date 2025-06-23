@@ -81,17 +81,35 @@ class PolygonService:
             logger.warning(f"Could not call decimals() on wCAS contract. ABI might be incorrect or contract not deployed/verified: {e}. Assuming 18 decimals.")
             self.wcas_decimals = 18 # Fallback, risky.
 
-    def mint_wcas(self, recipient_address: str, amount_cas: float) -> Optional[str]:
+    def mint_wcas(self, recipient_address: str, amount_cas: float, gas_payer_private_key: Optional[str] = None) -> Optional[str]:
         """
         KORRIGIERTE Version - Meta-Transaction kompatibel mit erhöhtem Gas Limit
         Behebt Meta-Transaction Probleme wenn Owner = Minter = gleiche Adresse
+        
+        Args:
+            recipient_address: Address to receive the minted tokens
+            amount_cas: Amount of CAS to mint (will be converted to wei)
+            gas_payer_private_key: Optional private key for gas payment (BYO-gas flow)
         """
         try:
+            # Determine which account to use for gas payment
+            if gas_payer_private_key:
+                # BYO-gas flow: use the provided private key for gas payment
+                gas_payer_account = self.web3.eth.account.from_key(gas_payer_private_key)
+                gas_payer_address = gas_payer_account.address
+                logger.info(f"Using BYO-gas flow with gas payer: {gas_payer_address}")
+            else:
+                # Traditional flow: minter pays gas
+                gas_payer_account = self.minter_account
+                gas_payer_address = self.minter_address
+                logger.info(f"Using traditional flow with minter paying gas: {gas_payer_address}")
+            
             amount_wei = int(amount_cas * (10**self.wcas_decimals))
             logger.info(f"=== STARTING wCAS MINT PROCESS (META-TX COMPATIBLE) ===")
             logger.info(f"Recipient: {recipient_address}")
             logger.info(f"Amount: {amount_cas} CAS = {amount_wei} wei")
             logger.info(f"Minter address: {self.minter_address}")
+            logger.info(f"Gas payer address: {gas_payer_address}")
             logger.info(f"Contract address: {self.wcas_contract.address}")
             logger.info(f"RPC URL: {settings.POLYGON_RPC_URL}")
             
@@ -133,14 +151,14 @@ class PolygonService:
                 logger.warning(f"Konnte aktuellen Block nicht abrufen: {block_error}")
 
             # Nonce und Transaction Parameter
-            nonce = self.web3.eth.get_transaction_count(self.minter_address)
+            nonce = self.web3.eth.get_transaction_count(gas_payer_address)
             logger.info(f"Nonce: {nonce}")
             
             # WICHTIG: Höheres Gas Limit für Meta-Transaction Contracts!
             gas_limit = 200000  # Erhöht von Standard (meist 100k-150k)
             
             tx_params = {
-                'from': self.minter_address,
+                'from': gas_payer_address,
                 'nonce': nonce,
                 'gas': gas_limit  # Höheres Limit!
             }
@@ -203,7 +221,7 @@ class PolygonService:
                 return None
 
             # Transaction signieren
-            signed_tx = self.minter_account.sign_transaction(transaction)
+            signed_tx = gas_payer_account.sign_transaction(transaction)
             logger.info("✅ Transaction signiert")
 
             # Transaction senden mit besserer Fehlerbehandlung
@@ -276,11 +294,11 @@ class PolygonService:
                                 checksum_to_address,
                                 amount_wei
                             ).build_transaction({
-                                'from': self.minter_address,
-                                'nonce': self.web3.eth.get_transaction_count(self.minter_address),
+                                'from': gas_payer_address,
+                                'nonce': self.web3.eth.get_transaction_count(gas_payer_address),
                                 'gas': 100000
                             })
-                            signed_forward_tx = self.minter_account.sign_transaction(forward_tx)
+                            signed_forward_tx = gas_payer_account.sign_transaction(forward_tx)
                             fwd_tx_hash = self.web3.eth.send_raw_transaction(signed_forward_tx.rawTransaction)
                             logger.info(
                                 f"Forwarding transaction sent. TxHash: {fwd_tx_hash.hex()}. Waiting for confirmation..."

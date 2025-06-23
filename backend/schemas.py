@@ -19,10 +19,7 @@ class User(UserBase):
 
 # --- Bridge Configuration Information ---
 class BridgeConfigResponse(BaseModel):
-    bridge_wcas_deposit_address: str
-
-    class Config:
-        from_attributes = True
+    bridge_wcas_deposit_address: str = Field(..., description="Address on Polygon where users send wCAS to bridge back to CAS.")
 
 # --- Schemas for wCAS to CAS Return Intention (Polygon -> Cascoin) ---
 
@@ -101,3 +98,16 @@ class WCASDepositResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# For Polygon Gas Deposits (BYO-gas flow)
+class PolygonGasDepositRequest(BaseModel):
+    cas_deposit_id: int = Field(..., description="ID of the CAS deposit this gas payment is for")
+    matic_required: float = Field(..., description="Amount of MATIC required for gas fees")
+
+class PolygonGasDepositResponse(BaseModel):
+    id: int
+    cas_deposit_id: int
+    polygon_gas_address: str = Field(..., description="Polygon address where user should send MATIC for gas")
+    matic_required: float = Field(..., description="Amount of MATIC required")
+    status: str
+    created_at: datetime

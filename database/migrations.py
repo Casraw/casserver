@@ -180,6 +180,9 @@ def run_all_migrations(db: Session):
         # Run confirmation tracking migration
         run_confirmation_tracking_migration(db)
         
+        # Run polygon gas deposits migration (BYO-gas flow)
+        run_polygon_gas_deposits_migration(db)
+        
         # Add future migrations here:
         # run_future_migration_1(db)
         # run_future_migration_2(db)
@@ -189,6 +192,177 @@ def run_all_migrations(db: Session):
     except Exception as e:
         logger.error(f"Migration process failed: {e}")
         raise
+
+def table_exists(db: Session, table_name: str) -> bool:
+    """
+    Check if a table exists in the database
+    """
+    try:
+        engine = db.get_bind()
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        return table_name in tables
+    except Exception as e:
+        logger.error(f"Error checking if table {table_name} exists: {e}")
+        return False
+
+def run_polygon_gas_deposits_migration(db: Session):
+    """
+    Run the migration to create polygon_gas_deposits table for BYO-gas flow
+    """
+    logger.info("=== Starting polygon_gas_deposits migration ===")
+    
+    try:
+        # Check if table already exists
+        if table_exists(db, "polygon_gas_deposits"):
+            logger.info("✅ polygon_gas_deposits table already exists, skipping creation")
+            return
+        
+        logger.info("Creating polygon_gas_deposits table...")
+        
+        # Detect database type for appropriate SQL
+        engine = db.get_bind()
+        dialect_name = engine.dialect.name
+        
+        if dialect_name == 'sqlite':
+            # SQLite version
+            create_table_sql = """
+            CREATE TABLE polygon_gas_deposits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cas_deposit_id INTEGER NOT NULL,
+                polygon_gas_address VARCHAR(42) UNIQUE NOT NULL,
+                required_matic DECIMAL(78,18) NOT NULL,
+                received_matic DECIMAL(78,18) DEFAULT 0.0,
+                status VARCHAR(50) DEFAULT 'pending' NOT NULL,
+                hd_index INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (cas_deposit_id) REFERENCES cas_deposits(id),
+                
+                CONSTRAINT check_status CHECK (status IN ('pending', 'funded', 'spent', 'expired')),
+                CONSTRAINT check_required_matic_positive CHECK (required_matic > 0),
+                CONSTRAINT check_received_matic_non_negative CHECK (received_matic >= 0),
+                CONSTRAINT check_hd_index_non_negative CHECK (hd_index >= 0)
+            )
+            """
+            
+            # Create indexes
+            indexes_sql = [
+                "CREATE INDEX idx_polygon_gas_deposits_cas_deposit_id ON polygon_gas_deposits(cas_deposit_id)",
+                "CREATE INDEX idx_polygon_gas_deposits_status ON polygon_gas_deposits(status)",
+                "CREATE INDEX idx_polygon_gas_deposits_address ON polygon_gas_deposits(polygon_gas_address)",
+                "CREATE INDEX idx_polygon_gas_deposits_created_at ON polygon_gas_deposits(created_at)"
+            ]
+            
+            # Create trigger for updated_at
+            trigger_sql = """
+            CREATE TRIGGER update_polygon_gas_deposits_updated_at
+                AFTER UPDATE ON polygon_gas_deposits
+                FOR EACH ROW
+            BEGIN
+                UPDATE polygon_gas_deposits 
+                SET updated_at = CURRENT_TIMESTAMP 
+                WHERE id = NEW.id;
+            END
+            """
+            
+        elif dialect_name == 'postgresql':
+            # PostgreSQL version
+            create_table_sql = """
+            CREATE TABLE polygon_gas_deposits (
+                id SERIAL PRIMARY KEY,
+                cas_deposit_id INTEGER NOT NULL,
+                polygon_gas_address VARCHAR(42) UNIQUE NOT NULL,
+                required_matic DECIMAL(78,18) NOT NULL,
+                received_matic DECIMAL(78,18) DEFAULT 0.0,
+                status VARCHAR(50) DEFAULT 'pending' NOT NULL,
+                hd_index INTEGER NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (cas_deposit_id) REFERENCES cas_deposits(id),
+                
+                CONSTRAINT check_status CHECK (status IN ('pending', 'funded', 'spent', 'expired')),
+                CONSTRAINT check_required_matic_positive CHECK (required_matic > 0),
+                CONSTRAINT check_received_matic_non_negative CHECK (received_matic >= 0),
+                CONSTRAINT check_hd_index_non_negative CHECK (hd_index >= 0)
+            )
+            """
+            
+            # Create indexes
+            indexes_sql = [
+                "CREATE INDEX idx_polygon_gas_deposits_cas_deposit_id ON polygon_gas_deposits(cas_deposit_id)",
+                "CREATE INDEX idx_polygon_gas_deposits_status ON polygon_gas_deposits(status)",
+                "CREATE INDEX idx_polygon_gas_deposits_address ON polygon_gas_deposits(polygon_gas_address)",
+                "CREATE INDEX idx_polygon_gas_deposits_created_at ON polygon_gas_deposits(created_at)"
+            ]
+            
+            # Create trigger for updated_at (PostgreSQL syntax)
+            trigger_sql = """
+            CREATE OR REPLACE FUNCTION update_polygon_gas_deposits_updated_at()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.updated_at = CURRENT_TIMESTAMP;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            
+            CREATE TRIGGER update_polygon_gas_deposits_updated_at
+                BEFORE UPDATE ON polygon_gas_deposits
+                FOR EACH ROW
+                EXECUTE FUNCTION update_polygon_gas_deposits_updated_at();
+            """
+        else:
+            logger.warning(f"Unknown database dialect: {dialect_name}, using SQLite syntax")
+            # Fallback to SQLite syntax
+            create_table_sql = """
+            CREATE TABLE polygon_gas_deposits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cas_deposit_id INTEGER NOT NULL,
+                polygon_gas_address VARCHAR(42) UNIQUE NOT NULL,
+                required_matic DECIMAL(78,18) NOT NULL,
+                received_matic DECIMAL(78,18) DEFAULT 0.0,
+                status VARCHAR(50) DEFAULT 'pending' NOT NULL,
+                hd_index INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (cas_deposit_id) REFERENCES cas_deposits(id)
+            )
+            """
+            indexes_sql = []
+            trigger_sql = ""
+        
+        # Execute the table creation
+        db.execute(text(create_table_sql))
+        logger.info("✅ Created polygon_gas_deposits table")
+        
+        # Create indexes
+        for index_sql in indexes_sql:
+            try:
+                db.execute(text(index_sql))
+                logger.info(f"✅ Created index: {index_sql.split('CREATE INDEX ')[1].split(' ON')[0]}")
+            except Exception as e:
+                logger.warning(f"Failed to create index: {e}")
+        
+        # Create trigger
+        if trigger_sql:
+            try:
+                db.execute(text(trigger_sql))
+                logger.info("✅ Created updated_at trigger")
+            except Exception as e:
+                logger.warning(f"Failed to create trigger: {e}")
+        
+        db.commit()
+        logger.info("🎉 polygon_gas_deposits migration completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"❌ polygon_gas_deposits migration failed: {e}")
+        logger.error("Full error details:", exc_info=True)
+        db.rollback()
+        # Don't re-raise to avoid breaking initialization
+        # The table might be created by SQLAlchemy models instead
 
 if __name__ == "__main__":
     # This allows the migration to be run standalone for testing

@@ -300,6 +300,7 @@
             submitButton.textContent = 'Processing...';
 
             try {
+                // Step 1: Get CAS deposit address
                 const response = await fetch('/api/request_cascoin_deposit_address', {
                     method: 'POST',
                     headers: {
@@ -319,21 +320,65 @@
                     // Start real-time updates for this user
                     startRealtimeUpdates(polygonAddress);
                     
+                    let gasAddressInfo = '';
+                    
+                    // Step 2: If direct payment, get gas address
+                    if (selectedFeeModel === 'direct_payment' && currentFeeEstimate) {
+                        try {
+                            const gasResponse = await fetch('/api/request_polygon_gas_address', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    cas_deposit_id: data.id,
+                                    matic_required: parseFloat(currentFeeEstimate.matic_fee_required)
+                                }),
+                            });
+                            
+                            const gasData = await gasResponse.json();
+                            
+                            if (gasResponse.ok) {
+                                gasAddressInfo = `
+                                    <div style="border: 2px solid #667eea; padding: 15px; border-radius: 8px; margin: 15px 0; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);">
+                                        <h5 style="color: #1976d2; margin: 0 0 10px 0;">
+                                            💳 Step 2: Pay Gas Fee with MATIC
+                                        </h5>
+                                        <div><strong>Gas Payment Address:</strong> 
+                                            <code style="background: #fff; padding: 4px 8px; border-radius: 4px; border: 1px solid #ddd;">${gasData.polygon_gas_address}</code>
+                                        </div>
+                                        <div><strong>Required MATIC:</strong> ${gasData.matic_required}</div>
+                                        <div style="margin-top: 10px;">
+                                            <button onclick="sendMaticPayment('${gasData.polygon_gas_address}', '${gasData.matic_required}')" 
+                                                    style="background: #1976d2; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+                                                💰 Pay ${gasData.matic_required} MATIC via MetaMask
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            } else {
+                                gasAddressInfo = `<div class="warning">⚠️ Could not create gas payment address: ${gasData.detail}</div>`;
+                            }
+                        } catch (gasError) {
+                            console.error('Gas address error:', gasError);
+                            gasAddressInfo = `<div class="warning">⚠️ Could not create gas payment address. Please try again.</div>`;
+                        }
+                    }
+                    
                     let feeInfo = '';
                     if (selectedFeeModel === 'direct_payment' && currentFeeEstimate) {
                         feeInfo = `
                             <div class="warning">
-                                <strong>Important:</strong> Make sure you have <strong>${currentFeeEstimate.matic_fee_required} MATIC</strong> 
-                                in your wallet to pay for gas fees when the wCAS is minted to your address.
+                                <strong>Important:</strong> You need to send MATIC to the gas payment address above to complete the bridge process.
                             </div>
                         `;
                     }
                     
                     // Initial display - real-time updates will enhance this
                     responseText.innerHTML = `
-                        <div style="border-left: 4px solid #ffc107; padding-left: 15px; margin: 10px 0;">
+                        <div style="border: 2px solid #ffc107; padding: 15px; border-radius: 8px; margin: 10px 0; background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);">
                             <h5 style="color: #ffc107; margin: 0 0 10px 0;">
-                                🔄 Bridge Status: Pending
+                                🪙 Step 1: Send CAS to Bridge
                             </h5>
                             <div><strong>Deposit ID:</strong> ${data.id || 'N/A'}</div>
                             <div><strong>Cascoin Deposit Address:</strong> 
@@ -346,9 +391,14 @@
                             <div><strong>Fee Model:</strong> ${selectedFeeModel === 'direct_payment' ? 'Pay with MATIC' : 'All-Inclusive'}</div>
                             <div><strong>Created:</strong> ${new Date(data.created_at).toLocaleString()}</div>
                         </div>
+                        ${gasAddressInfo}
                         ${feeInfo}
                         <div class="info" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                            💡 <strong>Next Step:</strong> Send exactly <strong>${bridgeAmount} CAS</strong> to the deposit address above to start the bridge process.
+                            💡 <strong>Instructions:</strong> 
+                            ${selectedFeeModel === 'direct_payment' ? 
+                                'Complete both steps above: (1) Send CAS to the deposit address, and (2) Send MATIC to the gas payment address.' : 
+                                `Send exactly <strong>${bridgeAmount} CAS</strong> to the deposit address above to start the bridge process.`
+                            }
                             <br><br>
                             ✨ <strong>Real-time updates are now active!</strong> This page will automatically update when your deposit is detected and processed.
                         </div>
@@ -365,6 +415,35 @@
                 submitButton.textContent = 'Get Cascoin Deposit Address';
             }
         });
+
+        // Function to send MATIC payment via MetaMask
+        window.sendMaticPayment = async function(gasAddress, maticAmount) {
+            if (!window.ethereum) {
+                alert('MetaMask not detected. Please install MetaMask to pay gas fees.');
+                return;
+            }
+            
+            try {
+                // Request account access
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                
+                // Send MATIC transaction
+                const txHash = await window.ethereum.request({
+                    method: 'eth_sendTransaction',
+                    params: [{
+                        from: window.ethereum.selectedAddress,
+                        to: gasAddress,
+                        value: '0x' + (parseFloat(maticAmount) * Math.pow(10, 18)).toString(16)
+                    }]
+                });
+                
+                alert(`MATIC payment sent! Transaction hash: ${txHash}`);
+                
+            } catch (error) {
+                console.error('MetaMask payment error:', error);
+                alert('Failed to send MATIC payment: ' + error.message);
+            }
+        };
     </script>
 </body>
 </html>

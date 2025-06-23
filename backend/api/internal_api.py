@@ -33,10 +33,27 @@ def verify_api_key(x_internal_api_key: Optional[str] = Header(None, alias="X-Int
 def mint_wcas_in_background(deposit_id: int, recipient_address: str, amount: float, db_session: Session):
     """
     This function is executed in the background to handle the wCAS minting process.
+    Supports both traditional minting and BYO-gas flow.
     """
     logger_prefix = f"[BackgroundTask] Minting for CasDeposit ID {deposit_id}: "
     try:
         logger.info(f"{logger_prefix}Starting background minting process.")
+        
+        # Check if this is a BYO-gas flow (has associated gas deposit)
+        gas_deposit = crud.get_polygon_gas_deposit_by_cas_deposit_id(db_session, deposit_id)
+        gas_payer_private_key = None
+        
+        if gas_deposit and gas_deposit.status == "funded":
+            # BYO-gas flow: use the gas deposit's private key
+            try:
+                gas_payer_private_key = crud.get_private_key_for_gas_deposit(gas_deposit)
+                logger.info(f"{logger_prefix}Using BYO-gas flow with gas deposit ID {gas_deposit.id}")
+            except Exception as e:
+                logger.error(f"{logger_prefix}Failed to derive private key for gas deposit: {e}")
+                crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)
+                return
+        else:
+            logger.info(f"{logger_prefix}Using traditional minting flow (bridge pays gas)")
         
         # 1. Initialize PolygonService
         try:
@@ -50,7 +67,8 @@ def mint_wcas_in_background(deposit_id: int, recipient_address: str, amount: flo
         # 2. Call mint_wcas
         mint_tx_hash = polygon_service.mint_wcas(
             recipient_address=recipient_address,
-            amount_cas=amount
+            amount_cas=amount,
+            gas_payer_private_key=gas_payer_private_key
         )
 
         # 3. Update DB based on result
@@ -68,6 +86,15 @@ def mint_wcas_in_background(deposit_id: int, recipient_address: str, amount: flo
                 mint_tx_hash=mint_tx_hash,
                 received_amount=amount
             )
+            
+            # Mark gas deposit as spent if this was BYO-gas flow
+            if gas_deposit:
+                crud.update_polygon_gas_deposit_status(
+                    db_session, 
+                    gas_deposit.id, 
+                    "spent"
+                )
+                logger.info(f"{logger_prefix}Marked gas deposit {gas_deposit.id} as spent")
         else:
             logger.error(f"{logger_prefix}PolygonService.mint_wcas did not return a transaction hash or failed.")
             crud.update_cas_deposit_status_and_mint_hash(db_session, deposit_id, "mint_failed", received_amount=amount)

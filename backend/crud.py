@@ -7,6 +7,9 @@ from typing import Optional
 
 from backend.services.cascoin_service import CascoinService
 
+from eth_account import Account
+from web3 import Web3
+
 # Instantiate the CascoinService
 # This assumes CascoinService is safe to be instantiated globally.
 # If it had per-request state or needed more complex setup, consider dependency injection.
@@ -205,3 +208,111 @@ def update_polygon_transaction_status_and_cas_hash(
         
         return poly_tx
     return None
+
+# --- CRUD for PolygonGasDeposit (BYO-gas flow) ---
+
+def get_next_hd_index(db: Session) -> int:
+    """Get the next available HD derivation index."""
+    # Find the highest index currently in use
+    max_index_result = db.query(func.max(PolygonGasDeposit.hd_index)).scalar()
+    if max_index_result is None:
+        from backend.config import settings
+        return settings.HD_INDEX_START
+    return max_index_result + 1
+
+def derive_polygon_gas_address(hd_index: int) -> tuple[str, str]:
+    """
+    Derive a polygon address and private key from HD mnemonic.
+    Returns (address, private_key_hex)
+    """
+    from backend.config import settings
+    
+    if settings.HD_MNEMONIC == "YOUR_HD_MNEMONIC_HERE_MUST_BE_SET_IN_ENV":
+        raise ValueError("HD_MNEMONIC not configured. Set HD_MNEMONIC environment variable.")
+    
+    # Derive account using BIP-44 path for Ethereum: m/44'/60'/0'/0/{index}
+    account = Account.from_mnemonic(
+        settings.HD_MNEMONIC, 
+        account_path=f"m/44'/60'/0'/0/{hd_index}"
+    )
+    
+    return account.address, account.key.hex()
+
+def create_polygon_gas_deposit(
+    db: Session, 
+    cas_deposit_id: int, 
+    matic_required: float
+) -> Optional[PolygonGasDeposit]:
+    """Create a new polygon gas deposit record with derived address."""
+    try:
+        # Get next HD index
+        hd_index = get_next_hd_index(db)
+        
+        # Derive address and private key
+        gas_address, private_key = derive_polygon_gas_address(hd_index)
+        
+        # Create the record
+        gas_deposit = PolygonGasDeposit(
+            cas_deposit_id=cas_deposit_id,
+            polygon_gas_address=gas_address,
+            required_matic=matic_required,
+            hd_index=hd_index
+        )
+        
+        db.add(gas_deposit)
+        db.commit()
+        db.refresh(gas_deposit)
+        
+        # Note: We don't store the private key in the DB for security
+        # It can be re-derived when needed using the hd_index
+        
+        return gas_deposit
+        
+    except Exception as e:
+        logger.error(f"Error creating polygon gas deposit: {e}", exc_info=True)
+        db.rollback()
+        return None
+
+def get_polygon_gas_deposit_by_address(db: Session, gas_address: str) -> Optional[PolygonGasDeposit]:
+    """Get a polygon gas deposit by its address."""
+    return db.query(PolygonGasDeposit).filter(
+        PolygonGasDeposit.polygon_gas_address == gas_address
+    ).first()
+
+def get_polygon_gas_deposit_by_cas_deposit_id(db: Session, cas_deposit_id: int) -> Optional[PolygonGasDeposit]:
+    """Get a polygon gas deposit by CAS deposit ID."""
+    return db.query(PolygonGasDeposit).filter(
+        PolygonGasDeposit.cas_deposit_id == cas_deposit_id
+    ).first()
+
+def update_polygon_gas_deposit_status(
+    db: Session, 
+    gas_deposit_id: int, 
+    new_status: str,
+    received_matic: Optional[float] = None
+) -> Optional[PolygonGasDeposit]:
+    """Update the status and received amount of a polygon gas deposit."""
+    gas_deposit = db.query(PolygonGasDeposit).filter(
+        PolygonGasDeposit.id == gas_deposit_id
+    ).first()
+    
+    if gas_deposit:
+        gas_deposit.status = new_status
+        if received_matic is not None:
+            gas_deposit.received_matic = received_matic
+        gas_deposit.updated_at = func.now()
+        db.commit()
+        db.refresh(gas_deposit)
+        return gas_deposit
+    return None
+
+def get_pending_polygon_gas_deposits(db: Session) -> list[PolygonGasDeposit]:
+    """Get all polygon gas deposits that are pending funding."""
+    return db.query(PolygonGasDeposit).filter(
+        PolygonGasDeposit.status == "pending"
+    ).all()
+
+def get_private_key_for_gas_deposit(gas_deposit: PolygonGasDeposit) -> str:
+    """Re-derive the private key for a gas deposit address."""
+    _, private_key = derive_polygon_gas_address(gas_deposit.hd_index)
+    return private_key

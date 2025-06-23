@@ -78,6 +78,22 @@ class WcasToCasReturnIntention(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+class PolygonGasDeposit(Base):
+    __tablename__ = "polygon_gas_deposits"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    cas_deposit_id = Column(Integer, ForeignKey("cas_deposits.id"), nullable=False)
+    polygon_gas_address = Column(String, unique=True, index=True, nullable=False)  # EOA controlled by bridge
+    required_matic = Column(Float, nullable=False)  # What the fee service quoted
+    received_matic = Column(Float, default=0.0)     # What was actually received
+    status = Column(String, default="pending", index=True)  # pending, funded, spent, expired
+    hd_index = Column(Integer, nullable=False)       # HD derivation index for this address
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationship back to the CAS deposit
+    cas_deposit = relationship("CasDeposit", backref="gas_deposits")
+
 # Function to create tables
 def create_db_tables():
     Base.metadata.create_all(bind=engine)
