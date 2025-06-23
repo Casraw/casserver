@@ -161,27 +161,20 @@ def check_confirmation_updates():
     try:
         logger.info("Checking confirmation updates for 'pending_confirmation' deposits...")
 
-        pending_deposit_ids = [d.id for d in db.query(CasDeposit.id).filter(CasDeposit.status == "pending_confirmation").all()]
+        pending_deposits = db.query(CasDeposit).filter(CasDeposit.status == "pending_confirmation").all()
 
-        if not pending_deposit_ids:
+        if not pending_deposits:
             logger.info("No deposits are currently 'pending_confirmation'.")
             return
 
-        logger.info(f"Found {len(pending_deposit_ids)} deposit(s) to check for confirmation updates.")
+        logger.info(f"Found {len(pending_deposits)} deposit(s) to check for confirmation updates.")
 
-        for deposit_id in pending_deposit_ids:
-            # Process each deposit in its own transaction context
-            session: DbSession = SessionLocal()
+        for deposit_record in pending_deposits:
+            if not deposit_record.deposit_tx_hash:
+                logger.warning(f"Deposit ID {deposit_record.id} is 'pending_confirmation' but has no transaction hash. Skipping.")
+                continue
+
             try:
-                deposit_record = session.query(CasDeposit).filter_by(id=deposit_id).first()
-                if not deposit_record:
-                    logger.warning(f"Deposit ID {deposit_id} not found, might have been processed or deleted.")
-                    continue
-                
-                if not deposit_record.deposit_tx_hash:
-                    logger.warning(f"Deposit ID {deposit_record.id} is 'pending_confirmation' but has no transaction hash. Skipping.")
-                    continue
-
                 # Get transaction details
                 tx_response = cascoin_rpc_call("gettransaction", [deposit_record.deposit_tx_hash])
                 
@@ -206,19 +199,24 @@ def check_confirmation_updates():
                 
                 # Check if fully confirmed
                 if new_confirmations >= CONFIRMATIONS_REQUIRED:
+                    # Set status to what the backend expects for a confirmed deposit ready for minting.
                     deposit_record.status = "cas_confirmed_pending_mint"
                     logger.info(f"Deposit ID {deposit_record.id} is now fully confirmed with {new_confirmations} confirmations. Status set to 'cas_confirmed_pending_mint'.")
                     
+                    # Extract amount from transaction data if not already present
                     if deposit_record.received_amount is None:
                         for detail in tx_data.get("details", []):
                             if detail.get("address") == deposit_record.cascoin_deposit_address and detail.get("category") == "receive":
                                 deposit_record.received_amount = abs(detail.get("amount", 0))
                                 break
                     
+                    # Commit the status update BEFORE triggering the minting process. This is crucial.
                     deposit_record.updated_at = func.now()
-                    session.commit()
-                    _send_deposit_update_notification(deposit_record.id)
+                    db.commit()
+                    _send_deposit_update_notification(deposit_record.id) # Notify for confirmed status
 
+                    # Now, trigger the minting process.
+                    # This runs outside the previous DB transaction to ensure backend sees the committed status.
                     if deposit_record.received_amount and deposit_record.received_amount > 0:
                         mint_triggered = trigger_wcas_minting(
                             deposit_id=deposit_record.id,
@@ -234,27 +232,27 @@ def check_confirmation_updates():
                             deposit_record.status = "mint_trigger_failed"
                             logger.error(f"Failed to trigger minting for deposit ID {deposit_record.id}")
                         
+                        # Commit the post-minting-trigger status
                         deposit_record.updated_at = func.now()
-                        session.commit()
-                        _send_deposit_update_notification(deposit_record.id)
+                        db.commit()
+                        _send_deposit_update_notification(deposit_record.id) # Notify for mint status
                         logger.info(f"Deposit ID {deposit_record.id}: Committed final status '{deposit_record.status}'.")
 
                 else:
+                    # If not fully confirmed, just update the confirmation count and commit.
                     deposit_record.updated_at = func.now()
-                    session.commit()
+                    db.commit()
                     _send_deposit_update_notification(deposit_record.id)
                     logger.info(f"Deposit ID {deposit_record.id}: Committed updated confirmation count '{deposit_record.current_confirmations}'.")
                 
             except Exception as e:
-                logger.error(f"An error occurred while checking confirmations for deposit {deposit_id}: {e}", exc_info=True)
-                if session.is_active:
-                    session.rollback()
-            finally:
-                if session.is_active:
-                    session.close()
+                logger.error(f"An error occurred while checking confirmations for deposit {deposit_record.id}: {e}", exc_info=True)
+                db.rollback()
 
     except Exception as e:
         logger.error(f"Error in confirmation checking cycle: {e}", exc_info=True)
+        if db.is_active:
+            db.rollback()
     finally:
         if db.is_active:
             db.close()
