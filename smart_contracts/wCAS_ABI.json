@@ -1,7 +1,8 @@
 [
   {
     "inputs": [
-      { "internalType": "address", "name": "initialOwner", "type": "address" }
+      { "internalType": "address", "name": "initialOwner", "type": "address" },
+      { "internalType": "address", "name": "trustedForwarder", "type": "address" }
     ],
     "stateMutability": "nonpayable", "type": "constructor"
   },
@@ -14,6 +15,26 @@
   },
   {
     "anonymous": false, "inputs": [
+      { "indexed": true, "internalType": "address", "name": "owner", "type": "address" },
+      { "indexed": true, "internalType": "address", "name": "minter", "type": "address" },
+      { "indexed": true, "internalType": "address", "name": "relayer", "type": "address" }
+    ], "name": "ContractDeployed", "type": "event"
+  },
+  {
+    "anonymous": false, "inputs": [
+      { "indexed": false, "internalType": "string", "name": "newURI", "type": "string" }
+    ], "name": "ContractURIUpdated", "type": "event"
+  },
+  {
+    "anonymous": false, "inputs": [
+      { "indexed": true, "internalType": "address", "name": "from", "type": "address" },
+      { "indexed": true, "internalType": "address", "name": "to", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "nonce", "type": "uint256" }
+    ], "name": "MetaTransferExecuted", "type": "event"
+  },
+  {
+    "anonymous": false, "inputs": [
       { "indexed": true, "internalType": "address", "name": "oldMinter", "type": "address" },
       { "indexed": true, "internalType": "address", "name": "newMinter", "type": "address" }
     ], "name": "MinterChanged", "type": "event"
@@ -23,6 +44,24 @@
       { "indexed": true, "internalType": "address", "name": "previousOwner", "type": "address" },
       { "indexed": true, "internalType": "address", "name": "newOwner", "type": "address" }
     ], "name": "OwnershipTransferred", "type": "event"
+  },
+  {
+    "anonymous": false, "inputs": [
+      { "indexed": true, "internalType": "address", "name": "oldRelayer", "type": "address" },
+      { "indexed": true, "internalType": "address", "name": "newRelayer", "type": "address" }
+    ], "name": "RelayerChanged", "type": "event"
+  },
+  {
+    "anonymous": false, "inputs": [
+      { "indexed": true, "internalType": "address", "name": "account", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }
+    ], "name": "TokensBurned", "type": "event"
+  },
+  {
+    "anonymous": false, "inputs": [
+      { "indexed": true, "internalType": "address", "name": "to", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }
+    ], "name": "TokensMinted", "type": "event"
   },
   {
     "anonymous": false, "inputs": [
@@ -55,8 +94,29 @@
     "name": "burn", "outputs": [], "stateMutability": "nonpayable", "type": "function"
   },
   {
+    "inputs": [
+      { "internalType": "address", "name": "account", "type": "address" },
+      { "internalType": "uint256", "name": "amount", "type": "uint256" }
+    ],
+    "name": "burnFrom", "outputs": [], "stateMutability": "nonpayable", "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "contractURI", "outputs": [ { "internalType": "string", "name": "", "type": "string" } ],
+    "stateMutability": "view", "type": "function"
+  },
+  {
     "inputs": [], "name": "decimals", "outputs": [ { "internalType": "uint8", "name": "", "type": "uint8" } ],
     "stateMutability": "view", "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "bridgeAddress", "type": "address" },
+      { "internalType": "uint256", "name": "amount", "type": "uint256" },
+      { "internalType": "uint256", "name": "nonce", "type": "uint256" },
+      { "internalType": "bytes", "name": "signature", "type": "bytes" }
+    ],
+    "name": "metaTransferToBridge", "outputs": [], "stateMutability": "nonpayable", "type": "function"
   },
   {
     "inputs": [
@@ -73,15 +133,36 @@
     "stateMutability": "view", "type": "function"
   },
   {
+    "inputs": [ { "internalType": "address", "name": "user", "type": "address" } ],
+    "name": "nonces", "outputs": [ { "internalType": "uint256", "name": "", "type": "uint256" } ],
+    "stateMutability": "view", "type": "function"
+  },
+  {
     "inputs": [], "name": "owner", "outputs": [ { "internalType": "address", "name": "", "type": "address" } ],
+    "stateMutability": "view", "type": "function"
+  },
+  {
+    "inputs": [], "name": "relayer", "outputs": [ { "internalType": "address", "name": "", "type": "address" } ],
     "stateMutability": "view", "type": "function"
   },
   {
     "inputs": [], "name": "renounceOwnership", "outputs": [], "stateMutability": "nonpayable", "type": "function"
   },
   {
+    "inputs": [ { "internalType": "string", "name": "newURI", "type": "string" } ],
+    "name": "setContractURI", "outputs": [], "stateMutability": "nonpayable", "type": "function"
+  },
+  {
+    "inputs": [ { "internalType": "string", "name": "newURI", "type": "string" } ],
+    "name": "setContractURIDirect", "outputs": [], "stateMutability": "nonpayable", "type": "function"
+  },
+  {
     "inputs": [ { "internalType": "address", "name": "newMinter", "type": "address" } ],
     "name": "setMinter", "outputs": [], "stateMutability": "nonpayable", "type": "function"
+  },
+  {
+    "inputs": [ { "internalType": "address", "name": "newRelayer", "type": "address" } ],
+    "name": "setRelayer", "outputs": [], "stateMutability": "nonpayable", "type": "function"
   },
   {
     "inputs": [], "name": "symbol", "outputs": [ { "internalType": "string", "name": "", "type": "string" } ],

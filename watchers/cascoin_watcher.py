@@ -149,20 +149,19 @@ def check_confirmation_updates():
     """
     db: DbSession = SessionLocal()
     try:
-        logger.info("Checking confirmation updates...")
+        logger.info("Checking confirmation updates for 'pending_confirmation' deposits...")
 
-        # Get deposits that are waiting for confirmations
-        pending_confirmations = db.query(CasDeposit).filter(CasDeposit.status == "pending_confirmation").all()
+        pending_deposits = db.query(CasDeposit).filter(CasDeposit.status == "pending_confirmation").all()
 
-        if not pending_confirmations:
-            logger.info("No deposits waiting for confirmations.")
+        if not pending_deposits:
+            logger.info("No deposits are currently 'pending_confirmation'.")
             return
 
-        logger.info(f"Found {len(pending_confirmations)} deposit(s) waiting for confirmations.")
+        logger.info(f"Found {len(pending_deposits)} deposit(s) to check for confirmation updates.")
 
-        for deposit_record in pending_confirmations:
+        for deposit_record in pending_deposits:
             if not deposit_record.deposit_tx_hash:
-                logger.warning(f"Deposit ID {deposit_record.id} has no transaction hash. Skipping confirmation check.")
+                logger.warning(f"Deposit ID {deposit_record.id} is 'pending_confirmation' but has no transaction hash. Skipping.")
                 continue
 
             try:
@@ -170,28 +169,32 @@ def check_confirmation_updates():
                 tx_response = cascoin_rpc_call("gettransaction", [deposit_record.deposit_tx_hash])
                 
                 if tx_response is None or tx_response.get("error"):
-                    logger.warning(f"Could not get transaction details for {deposit_record.deposit_tx_hash}")
+                    logger.warning(f"Could not get transaction details for {deposit_record.deposit_tx_hash} (Deposit ID: {deposit_record.id}). Will retry next cycle.")
                     continue
 
                 tx_data = tx_response.get("result", {})
-                confirmations = tx_data.get("confirmations", 0)
-                
-                # Update confirmation count
+                new_confirmations = tx_data.get("confirmations", 0)
                 old_confirmations = deposit_record.current_confirmations
-                deposit_record.current_confirmations = confirmations
+
+                # Only proceed if the confirmation count has actually changed.
+                if new_confirmations == old_confirmations:
+                    logger.info(f"Deposit ID {deposit_record.id}: Confirmations unchanged at {new_confirmations}. No update needed.")
+                    continue
+                
+                # --- Confirmation count has changed, process update ---
+                logger.info(f"Deposit ID {deposit_record.id}: Confirmation count changed from {old_confirmations} to {new_confirmations}.")
+
+                deposit_record.current_confirmations = new_confirmations
                 deposit_record.required_confirmations = CONFIRMATIONS_REQUIRED
                 deposit_record.updated_at = func.now()
                 
-                logger.info(f"Deposit ID {deposit_record.id}: confirmations updated from {old_confirmations} to {confirmations}/{CONFIRMATIONS_REQUIRED}")
-
                 # Check if fully confirmed
-                if confirmations >= CONFIRMATIONS_REQUIRED:
+                if new_confirmations >= CONFIRMATIONS_REQUIRED:
                     deposit_record.status = "confirmed"
-                    logger.info(f"Deposit ID {deposit_record.id} is now fully confirmed with {confirmations} confirmations.")
+                    logger.info(f"Deposit ID {deposit_record.id} is now fully confirmed with {new_confirmations} confirmations.")
                     
-                    # Extract amount from transaction data
+                    # Extract amount from transaction data if not already present
                     if deposit_record.received_amount is None:
-                        # Try to get amount from transaction details
                         for detail in tx_data.get("details", []):
                             if detail.get("address") == deposit_record.cascoin_deposit_address and detail.get("category") == "receive":
                                 deposit_record.received_amount = abs(detail.get("amount", 0))
@@ -214,22 +217,23 @@ def check_confirmation_updates():
                             logger.error(f"Failed to trigger minting for deposit ID {deposit_record.id}")
 
                 db.commit()
+                logger.info(f"Deposit ID {deposit_record.id}: Committed status '{deposit_record.status}' and confirmations '{deposit_record.current_confirmations}'.")
                 
-                # Send websocket update
+                # Send websocket update about the change
                 try:
-                    import requests
                     headers = {'Content-Type': 'application/json', 'X-Internal-API-Key': INTERNAL_API_KEY}
                     notify_payload = {"deposit_id": deposit_record.id}
                     requests.post(f"{BRIDGE_API_URL}/notify_deposit_update", json=notify_payload, headers=headers, timeout=5)
+                    logger.info(f"Sent websocket notification for deposit {deposit_record.id}.")
                 except Exception as e:
-                    logger.warning(f"Failed to send websocket notification for deposit {deposit_record.id}: {e}")
+                    logger.warning(f"Failed to send websocket notification for deposit {deposit_record.id} after update: {e}")
 
             except Exception as e:
-                logger.error(f"Error checking confirmations for deposit {deposit_record.id}: {e}", exc_info=True)
+                logger.error(f"An error occurred while checking confirmations for deposit {deposit_record.id}: {e}", exc_info=True)
                 db.rollback()
 
     except Exception as e:
-        logger.error(f"Error during confirmation checking cycle: {e}", exc_info=True)
+        logger.error(f"Error in confirmation checking cycle: {e}", exc_info=True)
         if db.is_active:
             db.rollback()
     finally:
