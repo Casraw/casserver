@@ -253,6 +253,45 @@ class PolygonService:
             try:
                 receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
                 
+                # Validate that tokens were minted to the intended recipient.
+                try:
+                    transfer_events = self.wcas_contract.events.Transfer().process_receipt(receipt)
+                    minted_ok = False
+                    for ev in transfer_events:
+                        if ev['args']['from'] == '0x0000000000000000000000000000000000000000':
+                            if ev['args']['to'].lower() == checksum_to_address.lower():
+                                minted_ok = True
+                                break
+
+                    if not minted_ok:
+                        # Tokens did not end up at the desired address. Attempt to forward them.
+                        logger.warning(
+                            f"Mint successful but tokens were not received by {checksum_to_address}. "
+                            f"Attempting to forward tokens to the recipient."
+                        )
+
+                        try:
+                            # Execute an ERC-20 transfer from minter to recipient for the minted amount.
+                            forward_tx = self.wcas_contract.functions.transfer(
+                                checksum_to_address,
+                                amount_wei
+                            ).build_transaction({
+                                'from': self.minter_address,
+                                'nonce': self.web3.eth.get_transaction_count(self.minter_address),
+                                'gas': 100000
+                            })
+                            signed_forward_tx = self.minter_account.sign_transaction(forward_tx)
+                            fwd_tx_hash = self.web3.eth.send_raw_transaction(signed_forward_tx.rawTransaction)
+                            logger.info(
+                                f"Forwarding transaction sent. TxHash: {fwd_tx_hash.hex()}. Waiting for confirmation..."
+                            )
+                            self.web3.eth.wait_for_transaction_receipt(fwd_tx_hash, timeout=300)
+                            logger.info("Token forwarding completed successfully.")
+                        except Exception as fwd_err:
+                            logger.error(f"Failed to forward tokens to recipient: {fwd_err}")
+                except Exception as parse_err:
+                    logger.warning(f"Could not parse Transfer events for validation: {parse_err}")
+                
                 logger.info("=== TRANSACTION RECEIPT ERHALTEN ===")
                 logger.info(f"Transaction Hash: {receipt.transactionHash.hex()}")
                 logger.info(f"Block Number: {receipt.blockNumber}")
