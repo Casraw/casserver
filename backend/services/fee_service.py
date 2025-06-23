@@ -20,7 +20,12 @@ class FeeService:
         self.bridge_fee_percentage = Decimal('0.001')  # 0.1% bridge fee
         
         # Minimum fees to cover network costs
-        self.min_polygon_fee_wei = Web3.to_wei(0.01, 'ether')  # 0.01 MATIC equivalent in gas
+        self.min_polygon_fee_wei = Web3.to_wei(0.01, 'ether')  # Base mint cost (0.01 MATIC)
+        
+        # Possible extra transfer if forwarding tokens from minter to user is required
+        # Roughly ~65k gas which we approximate as half the mint cost.
+        self.forward_transfer_fee_wei = Web3.to_wei(0.005, 'ether')  # 0.005 MATIC reserve
+        
         self.min_cas_fee = Decimal('0.001')  # 0.001 CAS minimum fee
         
         # Maximum fees to prevent excessive deductions
@@ -54,9 +59,10 @@ class FeeService:
         # Bridge service fee (always deducted from bridge amount)
         bridge_fee = max(cas_amount * self.bridge_fee_percentage, self.min_cas_fee)
         
-        # Polygon minting fee estimation
-        polygon_fee_matic = Web3.from_wei(self.min_polygon_fee_wei, 'ether')
-        polygon_fee_cas_equivalent = self._estimate_polygon_fee_in_cas()
+        # Polygon minting fee estimation (include potential forward transfer)
+        total_polygon_fee_wei = self.min_polygon_fee_wei + self.forward_transfer_fee_wei
+        polygon_fee_matic = Web3.from_wei(total_polygon_fee_wei, 'ether')
+        polygon_fee_cas_equivalent = self._estimate_polygon_fee_in_cas(include_forward=True)
         
         if model == 'direct_payment':
             # User pays MATIC directly, only deduct bridge service fee
@@ -158,7 +164,7 @@ class FeeService:
                 'fee_percentage': (total_fees / wcas_amount) * 100 if wcas_amount > 0 else Decimal('0')
             }
     
-    def _estimate_polygon_fee_in_cas(self) -> Decimal:
+    def _estimate_polygon_fee_in_cas(self, include_forward: bool = False) -> Decimal:
         """
         Estimate Polygon network fee in CAS equivalent.
         In production, this would fetch current MATIC/CAS exchange rate.
@@ -166,6 +172,8 @@ class FeeService:
         # Placeholder: Assume 1 MATIC = 100 CAS (adjust based on actual rates)
         matic_to_cas_rate = Decimal('100')
         estimated_gas_matic = Web3.from_wei(self.min_polygon_fee_wei, 'ether')
+        if include_forward:
+            estimated_gas_matic += Web3.from_wei(self.forward_transfer_fee_wei, 'ether')
         return Decimal(str(estimated_gas_matic)) * matic_to_cas_rate
     
     def _estimate_polygon_burn_fee_in_cas(self) -> Decimal:

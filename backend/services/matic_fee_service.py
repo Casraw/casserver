@@ -85,7 +85,7 @@ class MaticFeeService:
         """
         # Gas estimates for different operations
         gas_estimates = {
-            'mint_wcas': 100000,  # ERC20 mint operation
+            'mint_wcas': 165000,  # Mint + possible forwarding transfer
             'burn_wcas': 80000,   # ERC20 burn operation
             'transfer_wcas': 65000,  # ERC20 transfer
             'approve_wcas': 50000    # ERC20 approval
