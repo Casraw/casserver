@@ -98,272 +98,187 @@
         </div>
     </div>
 
-    <script>
-        let selectedFeeModel = 'direct_payment';
-        let currentFeeEstimate = null;
-
-        function selectFeeModel(model) {
-            selectedFeeModel = model;
-            
-            // Update UI
-            document.querySelectorAll('.fee-option').forEach(el => el.classList.remove('selected'));
-            
-            if (model === 'direct_payment') {
-                document.getElementById('directPayment').checked = true;
-                document.querySelector('#directPayment').closest('.fee-option').classList.add('selected');
-            } else {
-                document.getElementById('deductedFees').checked = true;
-                document.querySelector('#deductedFees').closest('.fee-option').classList.add('selected');
-            }
-            
-            // Recalculate fees
-            calculateFees();
-        }
-
-        async function calculateFees() {
-            const amount = document.getElementById('bridgeAmount').value;
-            
-            if (!amount || parseFloat(amount) <= 0) {
-                document.getElementById('feeBreakdown').style.display = 'none';
-                return;
-            }
-
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'loading';
-            loadingDiv.innerHTML = '<div class="spinner"></div>Calculating fees...';
-            loadingDiv.style.display = 'block';
-            
-            const feeDetails = document.getElementById('feeDetails');
-            feeDetails.innerHTML = '';
-            feeDetails.appendChild(loadingDiv);
-            document.getElementById('feeBreakdown').style.display = 'block';
-
-            try {
-                const response = await fetch(`/api/fees/quick-estimate?amount=${amount}&operation=cas_to_wcas&fee_model=${selectedFeeModel}`);
-                const data = await response.json();
-
-                loadingDiv.style.display = 'none';
-                currentFeeEstimate = data;
-
-                if (response.ok) {
-                    displayFeeBreakdown(data);
-                } else {
-                    feeDetails.innerHTML = `<div class="error">Error calculating fees: ${data.detail}</div>`;
-                }
-            } catch (error) {
-                loadingDiv.style.display = 'none';
-                console.error('Fee calculation error:', error);
-                feeDetails.innerHTML = `<div class="error">Failed to calculate fees. Please try again.</div>`;
-            }
-        }
-
-        function displayFeeBreakdown(data) {
-            const feeDetails = document.getElementById('feeDetails');
-            let html = '';
-
-            if (data.fee_model === 'direct_payment') {
-                html = `
-                    <div class="fee-row">
-                        <span class="fee-label">Bridge Amount:</span>
-                        <span class="fee-amount">${data.input_amount} CAS</span>
-                    </div>
-                    <div class="fee-row">
-                        <span class="fee-label">Bridge Service Fee:</span>
-                        <span class="fee-amount">${data.bridge_fee} CAS</span>
-                    </div>
-                    <div class="fee-row">
-                        <span class="fee-label">MATIC Gas Fee (you pay):</span>
-                        <span class="fee-amount">${data.matic_fee_required} MATIC</span>
-                    </div>
-                    <div class="fee-row">
-                        <span class="fee-label">You Will Receive:</span>
-                        <span class="fee-amount">${data.output_amount} wCAS</span>
-                    </div>
-                `;
-                
-                if (!data.is_valid) {
-                    html += `<div class="warning">⚠️ ${data.error_message}</div>`;
-                } else {
-                    html += `<div class="success">✅ Valid transaction. Make sure you have ${data.matic_fee_required} MATIC for gas fees.</div>`;
-                }
-            } else {
-                html = `
-                    <div class="fee-row">
-                        <span class="fee-label">Bridge Amount:</span>
-                        <span class="fee-amount">${data.input_amount} CAS</span>
-                    </div>
-                    <div class="fee-row">
-                        <span class="fee-label">Total Fees:</span>
-                        <span class="fee-amount">${data.total_fees} CAS</span>
-                    </div>
-                    <div class="fee-row">
-                        <span class="fee-label">Fee Percentage:</span>
-                        <span class="fee-amount">${data.fee_percentage}</span>
-                    </div>
-                    <div class="fee-row">
-                        <span class="fee-label">You Will Receive:</span>
-                        <span class="fee-amount">${data.output_amount} wCAS</span>
-                    </div>
-                `;
-                
-                if (!data.is_valid) {
-                    html += `<div class="warning">⚠️ ${data.error_message}</div>`;
-                } else {
-                    html += `<div class="success">✅ Valid transaction. All fees included in the bridge amount.</div>`;
-                }
-            }
-
-            feeDetails.innerHTML = html;
-        }
-
-        // Original form handler is moved to the real-time section below
-
-        // Real-time fee calculation
-        document.getElementById('bridgeAmount').addEventListener('input', function() {
-            const amount = this.value;
-            if (amount && parseFloat(amount) > 0) {
-                clearTimeout(this.calculateTimeout);
-                this.calculateTimeout = setTimeout(calculateFees, 500);
-            } else {
-                document.getElementById('feeBreakdown').style.display = 'none';
-            }
-        });
-
-        // Initialize with direct payment selected
-        selectFeeModel('direct_payment');
-    </script>
-    
-    <!-- Real-time Updates Script -->
     <script src="/js/realtime.js"></script>
     <script>
-        let realtimeClient = null;
-        
-        // Function to start real-time updates for a user
-        function startRealtimeUpdates(userAddress) {
-            if (realtimeClient) {
-                realtimeClient.disconnect();
-            }
-            
-            realtimeClient = window.initializeBridgeRealtime(userAddress);
-            
-            if (realtimeClient) {
-                // Add custom event handler for this page
-                realtimeClient.on('casDepositUpdate', (deposit) => {
-                    console.log('Received CAS deposit update:', deposit);
-                    // The UI will be updated automatically by the UIUpdater
-                });
-            }
-        }
-        
-        // Watch for form submissions to start real-time updates
-        const originalFormHandler = document.getElementById('casToPolyForm').onsubmit;
-        document.getElementById('casToPolyForm').addEventListener('submit', async function(event) {
-            event.preventDefault();
-            
+        document.addEventListener('DOMContentLoaded', () => {
             const polygonAddressInput = document.getElementById('polygonAddress');
-            const polygonAddress = polygonAddressInput.value.trim();
-            const bridgeAmount = document.getElementById('bridgeAmount').value;
+            const casToPolyForm = document.getElementById('casToPolyForm');
+            const submitButton = document.getElementById('submitButton');
             const responseArea = document.getElementById('responseArea');
             const responseText = document.getElementById('responseText');
-            const submitButton = document.getElementById('submitButton');
 
-            responseArea.style.display = 'none';
-            responseText.innerHTML = '';
+            let realtimeClient = null;
+            const uiUpdater = new BridgeUIUpdater();
 
-            if (!polygonAddress) {
-                responseArea.style.display = 'block';
-                responseText.innerHTML = '<span class="error">Please enter your Polygon address.</span>';
-                return;
-            }
-
-            if (!bridgeAmount || parseFloat(bridgeAmount) <= 0) {
-                responseArea.style.display = 'block';
-                responseText.innerHTML = '<span class="error">Please enter a valid bridge amount.</span>';
-                return;
-            }
-
-            // Basic validation for Ethereum address format
-            if (!/^0x[a-fA-F0-9]{40}$/.test(polygonAddress)) {
-                responseArea.style.display = 'block';
-                responseText.innerHTML = '<span class="error">Please enter a valid Polygon address (0x...).</span>';
-                return;
-            }
-
-            // Validate fee estimate
-            if (currentFeeEstimate && !currentFeeEstimate.is_valid) {
-                responseArea.style.display = 'block';
-                responseText.innerHTML = `<span class="error">Cannot proceed: ${currentFeeEstimate.error_message}</span>`;
-                return;
-            }
-
-            submitButton.disabled = true;
-            submitButton.textContent = 'Processing...';
-
-            try {
-                const response = await fetch('/api/request_cascoin_deposit_address', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        polygon_address: polygonAddress,
-                        bridge_amount: parseFloat(bridgeAmount),
-                        fee_model: selectedFeeModel
-                    }),
+            function initializeWebSocket(userAddress) {
+                if (realtimeClient) {
+                    realtimeClient.disconnect();
+                }
+                
+                realtimeClient = new BridgeRealtimeClient(userAddress);
+                
+                realtimeClient.on('casDepositUpdate', (deposit) => {
+                    console.log('Received casDepositUpdate via event:', deposit);
+                    uiUpdater.updateCasDepositStatus(deposit);
                 });
 
-                const data = await response.json();
-                responseArea.style.display = 'block';
+                realtimeClient.on('connected', () => {
+                    console.log('WebSocket connected and ready.');
+                    // You might want to update some UI element to show connection status
+                });
 
-                if (response.ok) {
-                    // Start real-time updates for this user
-                    startRealtimeUpdates(polygonAddress);
+                realtimeClient.on('disconnected', () => {
+                    console.log('WebSocket disconnected.');
+                });
+                
+                realtimeClient.connect();
+            }
+
+            casToPolyForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                submitButton.disabled = true;
+                submitButton.textContent = 'Processing...';
+                
+                const polygonAddress = polygonAddressInput.value;
+                
+                // Initialize WebSocket connection as soon as the user submits the form
+                initializeWebSocket(polygonAddress);
+                
+                const formData = {
+                    polygon_address: polygonAddress,
+                    // The fee model is handled by the selection logic, not part of the form submission directly.
+                    // The backend will create a deposit address. Specific fee handling will be based on subsequent actions.
+                };
+
+                try {
+                    const response = await fetch('/api/bridge/cas-to-poly', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
                     
-                    let feeInfo = '';
-                    if (selectedFeeModel === 'direct_payment' && currentFeeEstimate) {
-                        feeInfo = `
-                            <div class="warning">
-                                <strong>Important:</strong> Make sure you have <strong>${currentFeeEstimate.matic_fee_required} MATIC</strong> 
-                                in your wallet to pay for gas fees when the wCAS is minted to your address.
-                            </div>
-                        `;
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        // The WebSocket will now handle updates. 
+                        // The initial state is already handled by the UI updater.
+                        // We can just display the initial pending status from the HTTP response
+                        // if we want, but the websocket should provide the same info shortly.
+                        uiUpdater.updateCasDepositStatus(data); // Display initial response
+                    } else {
+                        responseText.innerHTML = `<div class="error">${data.detail || 'An unknown error occurred.'}</div>`;
+                        responseArea.style.display = 'block';
                     }
-                    
-                    // Initial display - real-time updates will enhance this
-                    responseText.innerHTML = `
-                        <div style="border-left: 4px solid #ffc107; padding-left: 15px; margin: 10px 0;">
-                            <h5 style="color: #ffc107; margin: 0 0 10px 0;">
-                                🔄 Bridge Status: Pending
-                            </h5>
-                            <div><strong>Deposit ID:</strong> ${data.id || 'N/A'}</div>
-                            <div><strong>Cascoin Deposit Address:</strong> 
-                                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${data.cascoin_deposit_address}</code>
-                            </div>
-                            <div><strong>Your Polygon Address:</strong> 
-                                <code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">${data.polygon_address}</code>
-                            </div>
-                            <div><strong>Bridge Amount:</strong> ${bridgeAmount} CAS</div>
-                            <div><strong>Fee Model:</strong> ${selectedFeeModel === 'direct_payment' ? 'Pay with MATIC' : 'All-Inclusive'}</div>
-                            <div><strong>Created:</strong> ${new Date(data.created_at).toLocaleString()}</div>
+                } catch (error) {
+                    responseText.innerHTML = `<div class="error">Failed to connect to the bridge service. Please try again later.</div>`;
+                    responseArea.style.display = 'block';
+                    console.error('Error:', error);
+                } finally {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Get Cascoin Deposit Address';
+                }
+            });
+
+            // Fee calculation logic from previous snippet
+            let selectedFeeModel = 'direct_payment';
+            let currentFeeEstimate = null;
+
+            function selectFeeModel(model) {
+                selectedFeeModel = model;
+                document.querySelectorAll('.fee-option').forEach(el => el.classList.remove('selected'));
+                const selectedOption = document.querySelector(`input[value="${model}"]`).closest('.fee-option');
+                if(selectedOption) {
+                    selectedOption.classList.add('selected');
+                }
+                document.getElementById(model === 'direct_payment' ? 'directPayment' : 'deductedFees').checked = true;
+                calculateFees();
+            }
+
+            async function calculateFees() {
+                const amountInput = document.getElementById('bridgeAmount');
+                const amount = amountInput.value;
+                if (!amount || parseFloat(amount) <= 0) {
+                    document.getElementById('feeBreakdown').style.display = 'none';
+                    return;
+                }
+                const feeDetails = document.getElementById('feeDetails');
+                feeDetails.innerHTML = `<div class="loading" style="display:block;"><div class="spinner"></div></div>`;
+                document.getElementById('feeBreakdown').style.display = 'block';
+
+                try {
+                    const response = await fetch(`/api/fees/quick-estimate?amount=${amount}&operation=cas_to_wcas&fee_model=${selectedFeeModel}`);
+                    const data = await response.json();
+                    currentFeeEstimate = data;
+                    if (response.ok) {
+                        displayFeeBreakdown(data);
+                    } else {
+                        feeDetails.innerHTML = `<div class="error">${data.detail}</div>`;
+                    }
+                } catch (error) {
+                    console.error('Fee calculation error:', error);
+                    feeDetails.innerHTML = `<div class="error">Failed to calculate fees.</div>`;
+                }
+            }
+            
+            function displayFeeBreakdown(data) {
+                const feeDetails = document.getElementById('feeDetails');
+                let html = '';
+                if (data.fee_model === 'direct_payment') {
+                    html = `
+                        <div class="fee-row">
+                            <span class="fee-label">Bridge Amount:</span>
+                            <span class="fee-amount">${data.input_amount} CAS</span>
                         </div>
-                        ${feeInfo}
-                        <div class="info" style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                            💡 <strong>Next Step:</strong> Send exactly <strong>${bridgeAmount} CAS</strong> to the deposit address above to start the bridge process.
-                            <br><br>
-                            ✨ <strong>Real-time updates are now active!</strong> This page will automatically update when your deposit is detected and processed.
+                        <div class="fee-row">
+                            <span class="fee-label">Bridge Service Fee:</span>
+                            <span class="fee-amount">${data.bridge_fee} CAS</span>
+                        </div>
+                        <div class="fee-row">
+                            <span class="fee-label">MATIC Gas Fee (you pay):</span>
+                            <span class="fee-amount">${data.matic_fee_required} MATIC</span>
+                        </div>
+                        <div class="fee-row">
+                            <span class="fee-label">You Will Receive:</span>
+                            <span class="fee-amount">${data.output_amount} wCAS</span>
                         </div>
                     `;
-                } else {
-                    responseText.innerHTML = `<span class="error">Error: ${data.detail || 'Failed to get deposit address.'} (Status: ${response.status})</span>`;
+                    if (!data.is_valid) {
+                        html += `<div class="warning">⚠️ ${data.error_message}</div>`;
+                    } else {
+                        html += `<div class="success">✅ Valid transaction. Make sure you have ${data.matic_fee_required} MATIC for gas fees.</div>`;
+                    }
+                } else { // deducted
+                    html = `
+                        <div class="fee-row">
+                            <span class="fee-label">Bridge Amount:</span>
+                            <span class="fee-amount">${data.input_amount} CAS</span>
+                        </div>
+                        <div class="fee-row">
+                            <span class="fee-label">Total Fees:</span>
+                            <span class="fee-amount">${data.total_fees} CAS</span>
+                        </div>
+                        <div class="fee-row">
+                            <span class="fee-label">Fee Percentage:</span>
+                            <span class="fee-amount">${(data.fee_percentage || 0).toFixed(2)}%</span>
+                        </div>
+                        <div class="fee-row">
+                            <span class="fee-label">You Will Receive:</span>
+                            <span class="fee-amount">${data.output_amount} wCAS</span>
+                        </div>
+                    `;
+                    if (!data.is_valid) {
+                        html += `<div class="warning">⚠️ ${data.error_message}</div>`;
+                    }
                 }
-            } catch (error) {
-                console.error('Request error:', error);
-                responseArea.style.display = 'block';
-                responseText.innerHTML = `<span class="error">Network error or unexpected issue: ${error.message}</span>`;
-            } finally {
-                submitButton.disabled = false;
-                submitButton.textContent = 'Get Cascoin Deposit Address';
+                feeDetails.innerHTML = html;
             }
+
+            // Initial setup
+            document.getElementById('bridgeAmount').addEventListener('input', calculateFees);
+            document.querySelectorAll('.fee-option').forEach(el => {
+                el.addEventListener('click', () => selectFeeModel(el.querySelector('input').value));
+            });
+            selectFeeModel('direct_payment'); // Set default on load
         });
     </script>
 </body>
